@@ -1,10 +1,6 @@
-/**
- * @file secure.controller.js
- * @description Controllers mapping PDF protection routes: password locking, password unlocking/decryption.
- */
-
 import fs from 'fs';
 import { protectPDF, unlockPDF } from '../services/secure.service.js';
+import { uploadFileToS3, uploadBufferToS3 } from '../services/s3.service.js';
 
 /**
  * Safely unlinks a temporary file from the disk.
@@ -37,6 +33,12 @@ export const handleProtect = async (req, res) => {
 
   try {
     const protectedBytes = await protectPDF(req.file.path, password);
+
+    // Background S3 upload of input PDF file
+    uploadFileToS3(req.file.path, `uploads/secure-protect-${Date.now()}.pdf`);
+    // Background S3 upload of output protected PDF file
+    uploadBufferToS3(Buffer.from(protectedBytes), `outputs/secured-${Date.now()}.pdf`, 'application/pdf');
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="secured.pdf"');
     res.send(Buffer.from(protectedBytes));
@@ -67,6 +69,12 @@ export const handleUnlock = async (req, res) => {
 
   try {
     const unlockedBytes = await unlockPDF(req.file.path, password);
+
+    // Background S3 upload of input PDF file
+    uploadFileToS3(req.file.path, `uploads/secure-unlock-${Date.now()}.pdf`);
+    // Background S3 upload of output unlocked PDF file
+    uploadBufferToS3(Buffer.from(unlockedBytes), `outputs/unlocked-${Date.now()}.pdf`, 'application/pdf');
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="unlocked.pdf"');
     res.send(Buffer.from(unlockedBytes));

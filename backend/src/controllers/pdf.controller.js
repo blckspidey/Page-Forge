@@ -8,6 +8,7 @@ import { mergePDFs } from '../services/merge.service.js';
 import { splitPDF } from '../services/split.service.js';
 import { organizePDF } from '../services/organize.service.js';
 import { editPDF } from '../services/edit.service.js';
+import { uploadFileToS3, uploadBufferToS3 } from '../services/s3.service.js';
 
 /**
  * Safely unlinks a temporary file from the disk.
@@ -37,6 +38,14 @@ export const handleMerge = async (req, res) => {
 
   try {
     const mergedBytes = await mergePDFs(filePaths);
+    
+    // Background S3 upload of input files
+    filePaths.forEach((path, idx) => {
+      uploadFileToS3(path, `uploads/merge-${Date.now()}-${idx}.pdf`);
+    });
+    // Background S3 upload of output file
+    uploadBufferToS3(Buffer.from(mergedBytes), `outputs/merged-${Date.now()}.pdf`, 'application/pdf');
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="merged.pdf"');
     res.send(Buffer.from(mergedBytes));
@@ -67,6 +76,12 @@ export const handleSplit = async (req, res) => {
 
   try {
     const result = await splitPDF(req.file.path, splitPages);
+
+    // Background S3 upload of input file
+    uploadFileToS3(req.file.path, `uploads/split-${Date.now()}.pdf`);
+    // Background S3 upload of output file
+    uploadBufferToS3(Buffer.from(result.data), `outputs/split-${Date.now()}-${result.filename}`, result.mimeType);
+
     res.setHeader('Content-Type', result.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
     res.send(Buffer.from(result.data));
@@ -106,6 +121,12 @@ export const handleOrganize = async (req, res) => {
 
   try {
     const organizedBytes = await organizePDF(req.file.path, operations);
+
+    // Background S3 upload of input file
+    uploadFileToS3(req.file.path, `uploads/organize-${Date.now()}.pdf`);
+    // Background S3 upload of output file
+    uploadBufferToS3(Buffer.from(organizedBytes), `outputs/organized-${Date.now()}.pdf`, 'application/pdf');
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="organized.pdf"');
     res.send(Buffer.from(organizedBytes));
@@ -145,6 +166,12 @@ export const handleEdit = async (req, res) => {
 
   try {
     const editedBytes = await editPDF(req.file.path, elements);
+
+    // Background S3 upload of input file
+    uploadFileToS3(req.file.path, `uploads/edit-${Date.now()}.pdf`);
+    // Background S3 upload of output file
+    uploadBufferToS3(Buffer.from(editedBytes), `outputs/edited-${Date.now()}.pdf`, 'application/pdf');
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="edited.pdf"');
     res.send(Buffer.from(editedBytes));

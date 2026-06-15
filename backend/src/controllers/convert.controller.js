@@ -1,11 +1,7 @@
-/**
- * @file convert.controller.js
- * @description Controllers mapping file format conversion routes: Word-to-PDF, PDF-to-Word.
- */
-
 import fs from 'fs';
 import path from 'path';
 import { wordToPdf, pdfToWord } from '../services/convert.service.js';
+import { uploadFileToS3, uploadBufferToS3 } from '../services/s3.service.js';
 
 /**
  * Safely unlinks a temporary file from the disk.
@@ -38,6 +34,12 @@ export const handleWordToPdf = async (req, res) => {
 
   try {
     const pdfBytes = await wordToPdf(req.file.path);
+
+    // Background S3 upload of input Word file
+    uploadFileToS3(req.file.path, `uploads/convert-word-${Date.now()}.docx`);
+    // Background S3 upload of output PDF
+    uploadBufferToS3(Buffer.from(pdfBytes), `outputs/converted-${Date.now()}.pdf`, 'application/pdf');
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${path.basename(req.file.originalname, '.docx')}.pdf"`);
     res.send(Buffer.from(pdfBytes));
@@ -68,6 +70,12 @@ export const handlePdfToWord = async (req, res) => {
 
   try {
     const docxBuffer = await pdfToWord(req.file.path);
+
+    // Background S3 upload of input PDF file
+    uploadFileToS3(req.file.path, `uploads/convert-pdf-${Date.now()}.pdf`);
+    // Background S3 upload of output Word file
+    uploadBufferToS3(Buffer.from(docxBuffer), `outputs/converted-${Date.now()}.docx`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.setHeader('Content-Disposition', `attachment; filename="${path.basename(req.file.originalname, '.pdf')}.docx"`);
     res.send(Buffer.from(docxBuffer));
