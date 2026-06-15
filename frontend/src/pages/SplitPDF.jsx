@@ -1,14 +1,38 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { splitPDF, downloadBlob } from '../services/api';
 import DropZone from '../components/DropZone';
 import { File, Scissors, Loader2, Info, CheckCircle2, Trash2 } from 'lucide-react';
 
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+
 export default function SplitPDF() {
   const [file, setFile] = useState(null);
+  const [totalPages, setTotalPages] = useState(0);
   const [splitPages, setSplitPages] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!file) {
+      setTotalPages(0);
+      return;
+    }
+    const loadPdf = async () => {
+      try {
+        const buf = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+        setTotalPages(pdf.numPages);
+      } catch (err) {
+        console.error(err);
+        setError('Failed to parse PDF.');
+        setFile(null);
+      }
+    };
+    loadPdf();
+  }, [file]);
 
   const handleFiles = (incoming) => {
     const pdf = incoming.find((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
@@ -65,7 +89,9 @@ export default function SplitPDF() {
                 <File className="w-7 h-7 text-brand-400 flex-shrink-0 mt-0.5" />
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-white truncate" title={file.name}>{file.name}</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {(file.size / 1024 / 1024).toFixed(2)} MB • {totalPages ? `${totalPages} page${totalPages !== 1 ? 's' : ''}` : 'Loading...'}
+                  </p>
                 </div>
               </div>
               <button
@@ -99,7 +125,9 @@ export default function SplitPDF() {
 
             {/* Range input */}
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-2">Page Ranges</label>
+              <label className="block text-xs font-medium text-slate-400 mb-2">
+                Page Ranges {totalPages > 0 && <span className="text-brand-400 ml-1">(Total: {totalPages} page{totalPages !== 1 ? 's' : ''})</span>}
+              </label>
               <input
                 id="input-split-ranges"
                 type="text"

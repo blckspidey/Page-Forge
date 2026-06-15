@@ -13,7 +13,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.js?url';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import SignatureCanvas from 'react-signature-canvas';
 import { editPDF, downloadBlob } from '../services/api';
 import { 
