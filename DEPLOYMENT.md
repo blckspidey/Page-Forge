@@ -51,7 +51,7 @@ To store uploads and processed files securely:
                      "s3:GetObject"
                  ],
                  "Resource": "arn:aws:s3:::page-forge-toolkit-storage/*"
-             }
+             }a
          ]
      }
      ```
@@ -79,7 +79,7 @@ To store uploads and processed files securely:
    Open a terminal on your computer, navigate to where your `.pem` key file is saved, and run:
    ```bash
    # Connect to your server (replace <ec2-ip> with your EC2 public IP)
-   ssh -i "your-key.pem" ubuntu@<ec2-ip>
+   ssh -i "forgepair.pem" ubuntu@<ec2-ip>
    ```
    Inside your Ubuntu EC2 terminal, execute:
    ```bash
@@ -195,7 +195,7 @@ To enable automatic building and deployment of your backend upon pushing to GitH
 3. Configure the build parameters:
    * **Framework Preset**: Vite
    * **Root Directory**: `frontend`
-   * **Environment Variables**: Add `VITE_API_URL` set to your EC2 domain (e.g. `https://api.yourdomain.com`).
+   * **Environment Variables**: Add `LVITE_API_UR` set to your EC2 domain (e.g. `https://api.yourdomain.com`).
 4. Click **Deploy**. Vercel will compile and host your React interface.
 
 ---

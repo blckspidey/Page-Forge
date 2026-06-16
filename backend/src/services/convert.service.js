@@ -32,25 +32,60 @@ export const wordToPdf = async (inputWordPath) => {
     const psScriptPath = path.join(uploadsDir, `convert_${uniqueId}.ps1`);
     const absoluteOutputPath = path.resolve(tempPdfPath);
 
+    const escapedInputPath = absoluteInputPath.replace(/'/g, "''");
+    const escapedOutputPath = absoluteOutputPath.replace(/'/g, "''");
+
     const psScriptContent = `
 $ErrorActionPreference = 'Stop'
+$before = Get-Process -Name WINWORD -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id
+$word = $null
+$doc = $null
+$wordPid = $null
+
 try {
     $word = New-Object -ComObject Word.Application
+    
+    # Determine the exact PID of the Word instance we just started
+    $after = Get-Process -Name WINWORD -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id
+    $wordPid = $after | Where-Object { $_ -notin $before } | Select-Object -First 1
+
+    # Configure Word app to run headlessly without popups
+    $word.DisplayAlerts = 0
+    $word.ScreenUpdating = $false
     $word.Visible = $false
-    $doc = $word.Documents.Open("${absoluteInputPath.replace(/\\/g, '\\\\')}")
-    # 17 represents wdFormatPDF
-    $doc.SaveAs("${absoluteOutputPath.replace(/\\/g, '\\\\')}", 17)
-    $doc.Close()
+
+    # Open the Word file
+    $doc = $word.Documents.Open('${escapedInputPath}')
+    
+    # Export as PDF (wdExportFormatPDF = 17)
+    $doc.ExportAsFixedFormat('${escapedOutputPath}', 17)
+    
+    $doc.Close($false)
     $word.Quit()
     Write-Host "Success"
 } catch {
     Write-Error $_.Exception.Message
-    if ($word) { $word.Quit() }
     exit 1
+} finally {
+    # Clean up COM references to allow garbage collector to reclaim resources
+    if ($doc) {
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($doc) | Out-Null
+    }
+    if ($word) {
+        try { $word.Quit() } catch {}
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) | Out-Null
+    }
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
+
+    # Force terminate the WINWORD process to ensure it is completely closed
+    if ($wordPid) {
+        Stop-Process -Id $wordPid -Force -ErrorAction SilentlyContinue
+    }
 }
 `;
     try {
-      fs.writeFileSync(psScriptPath, psScriptContent, 'utf-8');
+      fs.writeFileSync(psScriptPath, '\ufeff' + psScriptContent, 'utf-8');
       const cmd = `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${psScriptPath}"`;
       await execPromise(cmd);
 
@@ -62,7 +97,7 @@ try {
       return pdfBytes;
     } catch (err) {
       console.error('Word to PDF conversion error (PowerShell):', err);
-      throw new Error(`Word to PDF conversion failed: ${err.message}`);
+      throw new Error('Word to PDF conversion failed. Please ensure the document is not corrupted and is a valid Word file.');
     } finally {
       if (fs.existsSync(psScriptPath)) {
         try { fs.unlinkSync(psScriptPath); } catch (_) {}
@@ -94,7 +129,7 @@ try {
       return pdfBytes;
     } catch (err) {
       console.error('Word to PDF conversion error (LibreOffice):', err);
-      throw new Error(`Word to PDF conversion failed: ${err.message}`);
+      throw new Error('Word to PDF conversion failed. Please ensure the document is not corrupted and is a valid Word file.');
     } finally {
       if (fs.existsSync(tempInputPath)) {
         try { fs.unlinkSync(tempInputPath); } catch (_) {}

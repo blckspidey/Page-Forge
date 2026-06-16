@@ -39,6 +39,9 @@ export default function EditPDF() {
   const [pdfDoc, setPdfDoc] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
+  const [pageInputVal, setPageInputVal] = useState('1');
+  const [pageDimensions, setPageDimensions] = useState({});
+  const [placementCoords, setPlacementCoords] = useState(null); // { x, y, page }
   
   // Active Tool & Selection State
   const [tool, setTool] = useState('select'); // select, text, shape, image, signature
@@ -62,8 +65,10 @@ export default function EditPDF() {
   /* ────────────────────────────────────────────────────────────────────────
    * 3. REF HOOKS
    * ────────────────────────────────────────────────────────────────────── */
-  const canvasRef = useRef(null);
-  const overlayRef = useRef(null);
+  const canvasesRef = useRef({});
+  const overlaysRef = useRef({});
+  const scrollContainerRef = useRef(null);
+  const renderedPagesRef = useRef({});
   const sigCanvasRef = useRef(null);
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -80,7 +85,12 @@ export default function EditPDF() {
       setPdfDoc(null);
       setTotalPages(0);
       setCurrentPage(1);
+      setPageInputVal('1');
       setElements([]);
+      setPageDimensions({});
+      canvasesRef.current = {};
+      overlaysRef.current = {};
+      renderedPagesRef.current = {};
       return;
     }
 
@@ -94,9 +104,22 @@ export default function EditPDF() {
             const typedarray = new Uint8Array(e.target.result);
             const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
             setPdfDoc(pdf);
+            
+            // Extract dimensions for all pages immediately
+            const dimensions = {};
+            for (let i = 1; i <= pdf.numPages; i++) {
+              const page = await pdf.getPage(i);
+              const viewport = page.getViewport({ scale: EDITOR_SCALE });
+              dimensions[i] = { width: viewport.width, height: viewport.height };
+            }
+            setPageDimensions(dimensions);
             setTotalPages(pdf.numPages);
             setCurrentPage(1);
+            setPageInputVal('1');
             setElements([]);
+            canvasesRef.current = {};
+            overlaysRef.current = {};
+            renderedPagesRef.current = {};
           } catch (err) {
             console.error(err);
             setError('Failed to parse PDF.');
@@ -117,38 +140,134 @@ export default function EditPDF() {
   }, [file]);
 
   /**
-   * Effect: Renders the active PDF page onto the HTML5 screen canvas using pdfjs.
+   * Renders a single PDF page onto its canvas.
+   */
+  const renderSinglePage = async (pageNum) => {
+    if (!pdfDoc || renderedPagesRef.current[pageNum]) return;
+    renderedPagesRef.current[pageNum] = true;
+    
+    try {
+      const page = await pdfDoc.getPage(pageNum);
+      const canvas = canvasesRef.current[pageNum];
+      if (!canvas) {
+        renderedPagesRef.current[pageNum] = false;
+        return;
+      }
+
+      const context = canvas.getContext('2d');
+      const viewport = page.getViewport({ scale: EDITOR_SCALE });
+      
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      const renderContext = {
+        canvasContext: context,
+        viewport: viewport
+      };
+      await page.render(renderContext).promise;
+    } catch (err) {
+      console.error(`Page ${pageNum} render error:`, err);
+      renderedPagesRef.current[pageNum] = false;
+    }
+  };
+
+  /**
+   * Effect: Intersection Observer to lazy-render pages when they scroll near/into the viewport.
    */
   useEffect(() => {
-    if (!pdfDoc) return;
+    if (!pdfDoc || totalPages === 0) return;
 
-    const renderPage = async () => {
-      setRendering(true);
-      try {
-        const page = await pdfDoc.getPage(currentPage);
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const context = canvas.getContext('2d');
-        const viewport = page.getViewport({ scale: EDITOR_SCALE });
-        
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-
-        const renderContext = {
-          canvasContext: context,
-          viewport: viewport
-        };
-        await page.render(renderContext).promise;
-      } catch (err) {
-        console.error('Page render error:', err);
-      } finally {
-        setRendering(false);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const pageNum = parseInt(entry.target.dataset.page);
+            if (pageNum && !renderedPagesRef.current[pageNum]) {
+              renderSinglePage(pageNum);
+            }
+          }
+        });
+      },
+      {
+        threshold: 0.05,
+        root: scrollContainerRef.current,
+        rootMargin: '200px 0px'
       }
-    };
+    );
 
-    renderPage();
-  }, [pdfDoc, currentPage]);
+    for (let i = 1; i <= totalPages; i++) {
+      const el = document.getElementById(`pdf-page-container-${i}`);
+      if (el) {
+        observer.observe(el);
+      }
+    }
+
+    return () => observer.disconnect();
+  }, [pdfDoc, totalPages, pageDimensions]);
+
+  /**
+   * Handler: Updates the active page based on scroll position within the infinite scroll viewport.
+   */
+  const handleScroll = () => {
+    const container = scrollContainerRef.current;
+    if (!container || totalPages === 0) return;
+
+    const scrollTop = container.scrollTop;
+    const containerHeight = container.clientHeight;
+    
+    let activePage = 1;
+    let minDiff = Infinity;
+
+    for (let i = 1; i <= totalPages; i++) {
+      const pageEl = document.getElementById(`pdf-page-container-${i}`);
+      if (!pageEl) continue;
+
+      const pageTop = pageEl.offsetTop - container.offsetTop;
+      const pageHeight = pageEl.clientHeight;
+      
+      const pageCenter = pageTop + pageHeight / 2;
+      const viewportCenter = scrollTop + containerHeight / 2;
+
+      const diff = Math.abs(pageCenter - viewportCenter);
+      if (diff < minDiff) {
+        minDiff = diff;
+        activePage = i;
+      }
+    }
+
+    if (activePage !== currentPage) {
+      setCurrentPage(activePage);
+    }
+  };
+
+  /**
+   * Effect: Keeps page number input synchronized with current page on scroll.
+   */
+  useEffect(() => {
+    setPageInputVal(currentPage.toString());
+  }, [currentPage]);
+
+  /**
+   * Handler: Jumps to a specific page number.
+   */
+  const handleGoToPage = () => {
+    const pageNum = parseInt(pageInputVal);
+    if (pageNum >= 1 && pageNum <= totalPages) {
+      scrollToPage(pageNum);
+    } else {
+      setPageInputVal(currentPage.toString());
+    }
+  };
+
+  const scrollToPage = (pageNum) => {
+    if (pageNum >= 1 && pageNum <= totalPages) {
+      const pageEl = document.getElementById(`pdf-page-container-${pageNum}`);
+      if (pageEl) {
+        pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setCurrentPage(pageNum);
+      }
+    }
+  };
 
   /* ────────────────────────────────────────────────────────────────────────
    * 5. ELEMENT POSITIONING & SCALE GESTURE HANDLERS (DRAG & RESIZE)
@@ -351,14 +470,18 @@ export default function EditPDF() {
   /**
    * Handles user clicks on the overlay viewport to drop or inject tools content.
    */
-  const handleOverlayClick = (e) => {
+  const handleOverlayClick = (e, pageNum) => {
     if (tool === 'select') return;
 
-    const rect = overlayRef.current.getBoundingClientRect();
+    const overlayEl = overlaysRef.current[pageNum];
+    if (!overlayEl) return;
+    const rect = overlayEl.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
     const newElId = `el-${Date.now()}`;
+    const coords = { x, y, page: pageNum };
+    setPlacementCoords(coords);
 
     if (tool === 'text') {
       const textVal = prompt('Enter overlay text:', 'Page Forge Text');
@@ -367,7 +490,7 @@ export default function EditPDF() {
       const newEl = {
         id: newElId,
         type: 'text',
-        page: currentPage,
+        page: pageNum,
         x,
         y,
         text: textVal,
@@ -385,7 +508,7 @@ export default function EditPDF() {
         id: newElId,
         type: 'shape',
         shapeType,
-        page: currentPage,
+        page: pageNum,
         x: shapeType === 'line' ? x : x - 40,
         y: shapeType === 'line' ? y : y - 20,
         x1: x,
@@ -404,12 +527,8 @@ export default function EditPDF() {
       setSelectedElId(newElId);
     } else if (tool === 'image') {
       imageInputRef.current.click();
-      imageInputRef.current.dataset.placeX = x;
-      imageInputRef.current.dataset.placeY = y;
     } else if (tool === 'signature') {
       setShowSigModal(true);
-      overlayRef.current.dataset.placeX = x;
-      overlayRef.current.dataset.placeY = y;
     }
   };
 
@@ -423,8 +542,7 @@ export default function EditPDF() {
     const reader = new FileReader();
     reader.onload = () => {
       const base64 = reader.result;
-      const x = parseFloat(imageInputRef.current.dataset.placeX || '50');
-      const y = parseFloat(imageInputRef.current.dataset.placeY || '50');
+      const { x, y, page: pageNum } = placementCoords || { x: 50, y: 50, page: 1 };
 
       const img = new window.Image();
       img.onload = () => {
@@ -436,7 +554,7 @@ export default function EditPDF() {
         const newEl = {
           id: `img-${Date.now()}`,
           type: 'image',
-          page: currentPage,
+          page: pageNum,
           x: x - w / 2,
           y: y - h / 2,
           width: w,
@@ -445,6 +563,7 @@ export default function EditPDF() {
         };
         setElements((prev) => [...prev, newEl]);
         setTool('select');
+        setSelectedElId(newEl.id);
       };
       img.src = base64;
     };
@@ -459,8 +578,7 @@ export default function EditPDF() {
     if (sigCanvasRef.current.isEmpty()) return;
 
     const base64 = sigCanvasRef.current.getTrimmedCanvas().toDataURL('image/png');
-    const x = parseFloat(overlayRef.current.dataset.placeX || '50');
-    const y = parseFloat(overlayRef.current.dataset.placeY || '50');
+    const { x, y, page: pageNum } = placementCoords || { x: 50, y: 50, page: 1 };
 
     const w = 120;
     const h = 50;
@@ -468,7 +586,7 @@ export default function EditPDF() {
     const newEl = {
       id: `sig-${Date.now()}`,
       type: 'signature',
-      page: currentPage,
+      page: pageNum,
       x: x - w / 2,
       y: y - h / 2,
       width: w,
@@ -479,6 +597,7 @@ export default function EditPDF() {
     setElements((prev) => [...prev, newEl]);
     setShowSigModal(false);
     setTool('select');
+    setSelectedElId(newEl.id);
   };
 
   /* ────────────────────────────────────────────────────────────────────────
@@ -943,24 +1062,51 @@ export default function EditPDF() {
           <div className="lg:col-span-3 flex flex-col items-center justify-start bg-dark-900/30 p-6 rounded-2xl border border-white/5 relative min-h-[500px]">
             
             {/* Pagination Navigator bar */}
-            <div className="mb-4 flex items-center space-x-4">
-              <button
-                disabled={currentPage === 1}
-                onClick={() => { setCurrentPage(prev => Math.max(1, prev - 1)); setSelectedElId(null); }}
-                className="p-1.5 rounded-lg border border-white/5 text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span className="text-xs text-white">
-                Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>
-              </span>
-              <button
-                disabled={currentPage === totalPages}
-                onClick={() => { setCurrentPage(prev => Math.min(totalPages, prev + 1)); setSelectedElId(null); }}
-                className="p-1.5 rounded-lg border border-white/5 text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
+            <div className="sticky top-2 z-30 mb-4 flex flex-wrap items-center justify-center gap-4 bg-slate-900/90 backdrop-blur-md px-4 py-2.5 rounded-xl border border-white/10 w-full max-w-md shadow-lg">
+              <div className="flex items-center space-x-2">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => { scrollToPage(currentPage - 1); setSelectedElId(null); }}
+                  className="p-1.5 rounded-lg border border-white/5 text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs text-white">
+                  Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>
+                </span>
+                <button
+                  disabled={currentPage === totalPages}
+                  onClick={() => { scrollToPage(currentPage + 1); setSelectedElId(null); }}
+                  className="p-1.5 rounded-lg border border-white/5 text-slate-400 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="hidden sm:block h-4 w-px bg-white/10" />
+
+              <div className="flex items-center space-x-2">
+                <span className="text-[11px] text-slate-400">Go to page:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={pageInputVal}
+                  onChange={(e) => setPageInputVal(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleGoToPage();
+                    }
+                  }}
+                  className="w-12 px-2 py-1 bg-dark-900 border border-white/10 rounded text-xs text-white text-center font-semibold focus:outline-none focus:border-brand-500"
+                />
+                <button
+                  onClick={handleGoToPage}
+                  className="px-2 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-semibold transition-colors"
+                >
+                  Go
+                </button>
+              </div>
             </div>
 
             {rendering && (
@@ -970,205 +1116,227 @@ export default function EditPDF() {
             )}
 
             {/* Bounding box containing the PDF Canvas + Overlay Interaction Div */}
-            <div className="relative border border-slate-700/50 rounded-lg shadow-2xl bg-white select-none overflow-hidden max-h-[85vh] overflow-y-auto">
-              <canvas ref={canvasRef} className="block" />
-              
-              {/* Overlay listener tracking visual overlays */}
-              <div 
-                ref={overlayRef} 
-                onClick={handleOverlayClick}
-                className="absolute top-0 left-0 w-full h-full cursor-crosshair z-20"
-              >
-                {elements
-                  .filter((el) => el.page === currentPage)
-                  .map((el) => {
-                    const isSelected = el.id === selectedElId;
+            <div 
+              ref={scrollContainerRef}
+              onScroll={handleScroll}
+              className="w-full max-h-[80vh] overflow-y-auto space-y-6 flex flex-col items-center p-4 bg-dark-950/20 rounded-2xl border border-white/5 select-none"
+            >
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
+                const width = pageDimensions[pageNum]?.width || 500;
+                const height = pageDimensions[pageNum]?.height || 700;
+
+                return (
+                  <div
+                    key={pageNum}
+                    id={`pdf-page-container-${pageNum}`}
+                    data-page={pageNum}
+                    className="relative border border-slate-700/50 rounded-lg shadow-2xl bg-white select-none overflow-hidden flex-shrink-0 mb-6"
+                    style={{ width: `${width}px`, height: `${height}px` }}
+                  >
+                    <canvas 
+                      ref={(el) => { canvasesRef.current[pageNum] = el; }} 
+                      className="block pointer-events-none" 
+                    />
                     
-                    // Render overlay text box
-                    if (el.type === 'text') {
-                      return (
-                        <div
-                          key={el.id}
-                          style={{
-                            position: 'absolute',
-                            left: `${el.x}px`,
-                            top: `${el.y}px`,
-                            color: el.color,
-                            fontSize: `${el.fontSize}px`,
-                            fontFamily: el.fontFamily,
-                            border: isSelected ? '1px dashed #8b5cf6' : '1px transparent solid',
-                            padding: '1px',
-                            cursor: 'move',
-                            userSelect: 'none',
-                            whiteSpace: 'nowrap'
-                          }}
-                          onMouseDown={(e) => handleElDragStart(e, el.id)}
-                        >
-                          {el.text}
-                          {isSelected && (
-                            <div
-                              onMouseDown={(e) => handleElResizeStart(e, el.id)}
-                              className="absolute bottom-[-4px] right-[-4px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
-                              title="Drag to resize text font size"
-                            />
-                          )}
-                        </div>
-                      );
-                    }
-
-                    // Render overlay image or signature block
-                    if (el.type === 'image' || el.type === 'signature') {
-                      return (
-                        <div
-                          key={el.id}
-                          style={{
-                            position: 'absolute',
-                            left: `${el.x}px`,
-                            top: `${el.y}px`,
-                            width: `${el.width}px`,
-                            height: `${el.height}px`,
-                            border: isSelected ? '1px dashed #8b5cf6' : '1px transparent solid',
-                            cursor: 'move'
-                          }}
-                          onMouseDown={(e) => handleElDragStart(e, el.id)}
-                        >
-                          <img 
-                            src={el.imageBuffer} 
-                            alt="embedded" 
-                            className="w-full h-full pointer-events-none object-contain" 
-                          />
-                          {isSelected && (
-                            <div
-                              onMouseDown={(e) => handleElResizeStart(e, el.id)}
-                              className="absolute bottom-[-4px] right-[-4px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
-                              title="Drag to resize dimensions"
-                            />
-                          )}
-                        </div>
-                      );
-                    }
-
-                    // Render shape overlays (rectangle, circle, line vector)
-                    if (el.type === 'shape') {
-                      if (el.shapeType === 'rectangle') {
-                        return (
-                          <div
-                            key={el.id}
-                            style={{
-                              position: 'absolute',
-                              left: `${el.x}px`,
-                              top: `${el.y}px`,
-                              width: `${el.width}px`,
-                              height: `${el.height}px`,
-                              border: `${el.thickness}px solid ${el.color}`,
-                              backgroundColor: el.fill ? el.color : 'transparent',
-                              boxSizing: 'border-box',
-                              cursor: 'move'
-                            }}
-                            onMouseDown={(e) => handleElDragStart(e, el.id)}
-                          >
-                            {isSelected && (
+                    {/* Overlay listener tracking visual overlays */}
+                    <div 
+                      ref={(el) => { overlaysRef.current[pageNum] = el; }} 
+                      onClick={(e) => handleOverlayClick(e, pageNum)}
+                      className="absolute top-0 left-0 w-full h-full cursor-crosshair z-20"
+                    >
+                      {elements
+                        .filter((el) => el.page === pageNum)
+                        .map((el) => {
+                          const isSelected = el.id === selectedElId;
+                          
+                          // Render overlay text box
+                          if (el.type === 'text') {
+                            return (
                               <div
-                                onMouseDown={(e) => handleElResizeStart(e, el.id)}
-                                className="absolute bottom-[-4px] right-[-4px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
-                                title="Drag to resize dimensions"
-                              />
-                            )}
-                          </div>
-                        );
-                      }
+                                key={el.id}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${el.x}px`,
+                                  top: `${el.y}px`,
+                                  color: el.color,
+                                  fontSize: `${el.fontSize}px`,
+                                  fontFamily: el.fontFamily,
+                                  border: isSelected ? '1px dashed #8b5cf6' : '1px transparent solid',
+                                  padding: '1px',
+                                  cursor: 'move',
+                                  userSelect: 'none',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                onMouseDown={(e) => handleElDragStart(e, el.id)}
+                              >
+                                {el.text}
+                                {isSelected && (
+                                  <div
+                                    onMouseDown={(e) => handleElResizeStart(e, el.id)}
+                                    className="absolute bottom-[-4px] right-[-4px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
+                                    title="Drag to resize text font size"
+                                  />
+                                )}
+                              </div>
+                            );
+                          }
 
-                      if (el.shapeType === 'circle') {
-                        return (
-                          <div
-                            key={el.id}
-                            style={{
-                              position: 'absolute',
-                              left: `${el.x - el.radius}px`,
-                              top: `${el.y - el.radius}px`,
-                              width: `${el.radius * 2}px`,
-                              height: `${el.radius * 2}px`,
-                              borderRadius: '50%',
-                              border: `${el.thickness}px solid ${el.color}`,
-                              backgroundColor: el.fill ? el.color : 'transparent',
-                              boxSizing: 'border-box',
-                              cursor: 'move'
-                            }}
-                            onMouseDown={(e) => handleElDragStart(e, el.id)}
-                          >
-                            {isSelected && (
+                          // Render overlay image or signature block
+                          if (el.type === 'image' || el.type === 'signature') {
+                            return (
                               <div
-                                onMouseDown={(e) => handleElResizeStart(e, el.id)}
-                                className="absolute bottom-[0px] right-[0px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
-                                title="Drag to resize radius"
-                              />
-                            )}
-                          </div>
-                        );
-                      }
+                                key={el.id}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${el.x}px`,
+                                  top: `${el.y}px`,
+                                  width: `${el.width}px`,
+                                  height: `${el.height}px`,
+                                  border: isSelected ? '1px dashed #8b5cf6' : '1px transparent solid',
+                                  cursor: 'move'
+                                }}
+                                onMouseDown={(e) => handleElDragStart(e, el.id)}
+                              >
+                                <img 
+                                  src={el.imageBuffer} 
+                                  alt="embedded" 
+                                  className="w-full h-full pointer-events-none object-contain" 
+                                />
+                                {isSelected && (
+                                  <div
+                                    onMouseDown={(e) => handleElResizeStart(e, el.id)}
+                                    className="absolute bottom-[-4px] right-[-4px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
+                                    title="Drag to resize dimensions"
+                                  />
+                                )}
+                              </div>
+                            );
+                          }
 
-                      if (el.shapeType === 'line') {
-                        const xMin = Math.min(el.x1, el.x2);
-                        const yMin = Math.min(el.y1, el.y2);
-                        const w = Math.abs(el.x2 - el.x1) + el.thickness * 2;
-                        const h = Math.abs(el.y2 - el.y1) + el.thickness * 2;
-
-                        return (
-                          <div
-                            key={el.id}
-                            style={{
-                              position: 'absolute',
-                              left: `${xMin - el.thickness}px`,
-                              top: `${yMin - el.thickness}px`,
-                              width: `${w}px`,
-                              height: `${h}px`,
-                              border: isSelected ? '1px dashed #8b5cf6' : '1px transparent solid',
-                              cursor: 'move'
-                            }}
-                            onMouseDown={(e) => handleElDragStart(e, el.id)}
-                          >
-                            <svg className="w-full h-full pointer-events-none">
-                              <line
-                                x1={el.x1 - xMin + el.thickness}
-                                y1={el.y1 - yMin + el.thickness}
-                                x2={el.x2 - xMin + el.thickness}
-                                y2={el.y2 - yMin + el.thickness}
-                                stroke={el.color}
-                                strokeWidth={el.thickness}
-                              />
-                            </svg>
-                            {isSelected && (
-                              <>
+                          // Render shape overlays (rectangle, circle, line vector)
+                          if (el.type === 'shape') {
+                            if (el.shapeType === 'rectangle') {
+                              return (
                                 <div
-                                  onMouseDown={(e) => handleLineResizeStart(e, el.id, 'x1')}
+                                  key={el.id}
                                   style={{
                                     position: 'absolute',
-                                    left: `${el.x1 - xMin + el.thickness - 4}px`,
-                                    top: `${el.y1 - yMin + el.thickness - 4}px`,
+                                    left: `${el.x}px`,
+                                    top: `${el.y}px`,
+                                    width: `${el.width}px`,
+                                    height: `${el.height}px`,
+                                    border: `${el.thickness}px solid ${el.color}`,
+                                    backgroundColor: el.fill ? el.color : 'transparent',
+                                    boxSizing: 'border-box',
+                                    cursor: 'move'
                                   }}
-                                  className="w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-pointer z-30"
-                                  title="Drag start point"
-                                />
+                                  onMouseDown={(e) => handleElDragStart(e, el.id)}
+                                >
+                                  {isSelected && (
+                                    <div
+                                      onMouseDown={(e) => handleElResizeStart(e, el.id)}
+                                      className="absolute bottom-[-4px] right-[-4px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
+                                      title="Drag to resize dimensions"
+                                    />
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            if (el.shapeType === 'circle') {
+                              return (
                                 <div
-                                  onMouseDown={(e) => handleLineResizeStart(e, el.id, 'x2')}
+                                  key={el.id}
                                   style={{
                                     position: 'absolute',
-                                    left: `${el.x2 - xMin + el.thickness - 4}px`,
-                                    top: `${el.y2 - yMin + el.thickness - 4}px`,
+                                    left: `${el.x - el.radius}px`,
+                                    top: `${el.y - el.radius}px`,
+                                    width: `${el.radius * 2}px`,
+                                    height: `${el.radius * 2}px`,
+                                    borderRadius: '50%',
+                                    border: `${el.thickness}px solid ${el.color}`,
+                                    backgroundColor: el.fill ? el.color : 'transparent',
+                                    boxSizing: 'border-box',
+                                    cursor: 'move'
                                   }}
-                                  className="w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-pointer z-30"
-                                  title="Drag end point"
-                                />
-                              </>
-                            )}
-                          </div>
-                        );
-                      }
-                    }
+                                  onMouseDown={(e) => handleElDragStart(e, el.id)}
+                                >
+                                  {isSelected && (
+                                    <div
+                                      onMouseDown={(e) => handleElResizeStart(e, el.id)}
+                                      className="absolute bottom-[0px] right-[0px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
+                                      title="Drag to resize radius"
+                                    />
+                                  )}
+                                </div>
+                              );
+                            }
 
-                    return null;
-                  })}
-              </div>
+                            if (el.shapeType === 'line') {
+                              const xMin = Math.min(el.x1, el.x2);
+                              const yMin = Math.min(el.y1, el.y2);
+                              const w = Math.abs(el.x2 - el.x1) + el.thickness * 2;
+                              const h = Math.abs(el.y2 - el.y1) + el.thickness * 2;
+
+                              return (
+                                <div
+                                  key={el.id}
+                                  style={{
+                                    position: 'absolute',
+                                    left: `${xMin - el.thickness}px`,
+                                    top: `${yMin - el.thickness}px`,
+                                    width: `${w}px`,
+                                    height: `${h}px`,
+                                    border: isSelected ? '1px dashed #8b5cf6' : '1px transparent solid',
+                                    cursor: 'move'
+                                  }}
+                                  onMouseDown={(e) => handleElDragStart(e, el.id)}
+                                >
+                                  <svg className="w-full h-full pointer-events-none">
+                                    <line
+                                      x1={el.x1 - xMin + el.thickness}
+                                      y1={el.y1 - yMin + el.thickness}
+                                      x2={el.x2 - xMin + el.thickness}
+                                      y2={el.y2 - yMin + el.thickness}
+                                      stroke={el.color}
+                                      strokeWidth={el.thickness}
+                                    />
+                                  </svg>
+                                  {isSelected && (
+                                    <>
+                                      <div
+                                        onMouseDown={(e) => handleLineResizeStart(e, el.id, 'x1')}
+                                        style={{
+                                          position: 'absolute',
+                                          left: `${el.x1 - xMin + el.thickness - 4}px`,
+                                          top: `${el.y1 - yMin + el.thickness - 4}px`,
+                                        }}
+                                        className="w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-pointer z-30"
+                                        title="Drag start point"
+                                      />
+                                      <div
+                                        onMouseDown={(e) => handleLineResizeStart(e, el.id, 'x2')}
+                                        style={{
+                                          position: 'absolute',
+                                          left: `${el.x2 - xMin + el.thickness - 4}px`,
+                                          top: `${el.y2 - yMin + el.thickness - 4}px`,
+                                        }}
+                                        className="w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-pointer z-30"
+                                        title="Drag end point"
+                                      />
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            }
+                          }
+
+                          return null;
+                        })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
