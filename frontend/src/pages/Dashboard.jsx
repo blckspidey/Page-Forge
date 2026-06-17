@@ -111,6 +111,17 @@ export default function Dashboard() {
           );
         })}
       </div>
+
+      {/* Footer credit */}
+      <div className="relative z-10 mt-20 flex flex-col items-center gap-3">
+        <div className="w-48 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+        <p className="text-[11px] tracking-widest uppercase text-dark-500/60 font-medium select-none">
+          Made with{' '}
+          <span className="text-brand-500/50 mx-0.5">♥</span>
+          {' '}by{' '}
+          <span className="text-brand-400/50 font-semibold">blckspidey</span>
+        </p>
+      </div>
     </div>
   );
 }

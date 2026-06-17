@@ -14,7 +14,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import SignatureCanvas from 'react-signature-canvas';
+// react-signature-canvas removed — replaced with native canvas pad (React 19 compatible)
 import { editPDF, downloadBlob } from '../services/api';
 import { 
   Upload, File, Edit3, Type, Square, Image, PenTool, 
@@ -55,9 +55,11 @@ export default function EditPDF() {
   const [shapeType, setShapeType] = useState('rectangle');
   const [shapeThickness, setShapeThickness] = useState(3);
   const [shapeFill, setShapeFill] = useState(false);
+  const [zoom, setZoom] = useState(1); // Page zoom level (0.5 – 3×)
 
   // Modal, Loading, & Feedback UI States
   const [showSigModal, setShowSigModal] = useState(false);
+  const [sigIsEmpty, setSigIsEmpty] = useState(true); // Tracks whether anything has been drawn
   const [loading, setLoading] = useState(false);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState(null);
@@ -69,7 +71,8 @@ export default function EditPDF() {
   const overlaysRef = useRef({});
   const scrollContainerRef = useRef(null);
   const renderedPagesRef = useRef({});
-  const sigCanvasRef = useRef(null);
+  const sigCanvasRef = useRef(null);   // Ref to the native <canvas> drawing pad
+  const sigDrawingRef = useRef(false); // Is the user currently drawing?
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
 
@@ -138,6 +141,77 @@ export default function EditPDF() {
 
     loadPdf();
   }, [file]);
+
+  /**
+   * Effect: Clears the native canvas pad every time the modal opens so stale
+   * strokes from a previous session are never visible.
+   */
+  useEffect(() => {
+    if (showSigModal) {
+      // Short defer so the modal DOM is fully mounted before we touch the canvas
+      const t = setTimeout(() => {
+        const canvas = sigCanvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        setSigIsEmpty(true);
+        sigDrawingRef.current = false;
+      }, 50);
+      return () => clearTimeout(t);
+    }
+  }, [showSigModal]);
+
+  /* ── Native signature-pad drawing helpers ── */
+
+  /** Translates a mouse or touch event into canvas-buffer coordinates. */
+  const getSigPos = (e) => {
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+      x: (clientX - rect.left) * (canvas.width / rect.width),
+      y: (clientY - rect.top) * (canvas.height / rect.height)
+    };
+  };
+
+  const sigHandleStart = (e) => {
+    e.preventDefault();
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const { x, y } = getSigPos(e);
+    sigDrawingRef.current = true;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setSigIsEmpty(false);
+  };
+
+  const sigHandleMove = (e) => {
+    e.preventDefault();
+    if (!sigDrawingRef.current) return;
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const { x, y } = getSigPos(e);
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = '#111111';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  };
+
+  const sigHandleEnd = () => { sigDrawingRef.current = false; };
+
+  const clearSigPad = () => {
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return;
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    setSigIsEmpty(true);
+  };
 
   /**
    * Renders a single PDF page onto its canvas.
@@ -281,52 +355,37 @@ export default function EditPDF() {
     e.preventDefault();
     setSelectedElId(elId);
 
-    const startX = e.clientX;
-    const startY = e.clientY;
+    const getXY = (ev) => ev.touches?.length
+      ? { x: ev.touches[0].clientX, y: ev.touches[0].clientY }
+      : { x: ev.clientX, y: ev.clientY };
+
+    const { x: startX, y: startY } = getXY(e);
     const el = elements.find((item) => item.id === elId);
     if (!el) return;
+    const { x: ix, y: iy, x1: ix1, y1: iy1, x2: ix2, y2: iy2 } = el;
 
-    const initialX = el.x;
-    const initialY = el.y;
-    const initialX1 = el.x1;
-    const initialY1 = el.y1;
-    const initialX2 = el.x2;
-    const initialY2 = el.y2;
-
-    const handleMouseMove = (moveEvent) => {
-      const dx = moveEvent.clientX - startX;
-      const dy = moveEvent.clientY - startY;
-
-      setElements((prev) =>
-        prev.map((item) => {
-          if (item.id === elId) {
-            if (item.type === 'shape' && item.shapeType === 'line') {
-              return {
-                ...item,
-                x1: initialX1 + dx,
-                y1: initialY1 + dy,
-                x2: initialX2 + dx,
-                y2: initialY2 + dy
-              };
-            }
-            return {
-              ...item,
-              x: initialX + dx,
-              y: initialY + dy
-            };
-          }
-          return item;
-        })
-      );
+    const handleMove = (mv) => {
+      if (mv.cancelable) mv.preventDefault();
+      const { x, y } = getXY(mv);
+      const dx = (x - startX) / zoom;
+      const dy = (y - startY) / zoom;
+      setElements((prev) => prev.map((item) => {
+        if (item.id !== elId) return item;
+        if (item.type === 'shape' && item.shapeType === 'line')
+          return { ...item, x1: ix1+dx, y1: iy1+dy, x2: ix2+dx, y2: iy2+dy };
+        return { ...item, x: ix+dx, y: iy+dy };
+      }));
     };
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+    const handleEnd = () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleEnd);
+      document.removeEventListener('touchmove', handleMove);
+      document.removeEventListener('touchend', handleEnd);
     };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleEnd);
+    document.addEventListener('touchmove', handleMove, { passive: false });
+    document.addEventListener('touchend', handleEnd);
   };
 
   /**
@@ -335,66 +394,45 @@ export default function EditPDF() {
   const handleElResizeStart = (e, elId) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    const startX = e.clientX;
-    const startY = e.clientY;
+
+    const getXY = (ev) => ev.touches?.length
+      ? { x: ev.touches[0].clientX, y: ev.touches[0].clientY }
+      : { x: ev.clientX, y: ev.clientY };
+
+    const { x: startX, y: startY } = getXY(e);
     const el = elements.find((item) => item.id === elId);
     if (!el) return;
-    
-    const initialW = el.width || 0;
-    const initialH = el.height || 0;
-    const initialR = el.radius || 0;
-    const initialFontSize = el.fontSize || 0;
-    const initialX2 = el.x2 || 0;
-    const initialY2 = el.y2 || 0;
+    const iW = el.width||0, iH = el.height||0, iR = el.radius||0;
+    const iFs = el.fontSize||0, iX2 = el.x2||0, iY2 = el.y2||0;
 
-    const handleMouseMove = (moveEvent) => {
-      const dx = moveEvent.clientX - startX;
-      const dy = moveEvent.clientY - startY;
-
-      setElements((prev) =>
-        prev.map((item) => {
-          if (item.id === elId) {
-            if (item.type === 'text') {
-              const newFontSize = Math.max(8, initialFontSize + Math.round(dx * 0.2));
-              return {
-                ...item,
-                fontSize: newFontSize,
-                width: item.text.length * (newFontSize * 0.6),
-                height: newFontSize * 1.2
-              };
-            }
-            if (item.type === 'shape' && item.shapeType === 'circle') {
-              return {
-                ...item,
-                radius: Math.max(5, initialR + Math.round(dx * 0.5))
-              };
-            }
-            if (item.type === 'shape' && item.shapeType === 'line') {
-              return {
-                ...item,
-                x2: initialX2 + dx,
-                y2: initialY2 + dy
-              };
-            }
-            return {
-              ...item,
-              width: Math.max(10, initialW + dx),
-              height: Math.max(10, initialH + dy)
-            };
-          }
-          return item;
-        })
-      );
+    const handleMove = (mv) => {
+      if (mv.cancelable) mv.preventDefault();
+      const { x, y } = getXY(mv);
+      const dx = (x - startX) / zoom;
+      const dy = (y - startY) / zoom;
+      setElements((prev) => prev.map((item) => {
+        if (item.id !== elId) return item;
+        if (item.type === 'text') {
+          const nFs = Math.max(8, iFs + Math.round(dx * 0.2));
+          return { ...item, fontSize: nFs, width: item.text.length*(nFs*0.6), height: nFs*1.2 };
+        }
+        if (item.type === 'shape' && item.shapeType === 'circle')
+          return { ...item, radius: Math.max(5, iR + Math.round(dx*0.5)) };
+        if (item.type === 'shape' && item.shapeType === 'line')
+          return { ...item, x2: iX2+dx, y2: iY2+dy };
+        return { ...item, width: Math.max(10, iW+dx), height: Math.max(10, iH+dy) };
+      }));
     };
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+    const handleEnd = () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleEnd);
+      document.removeEventListener('touchmove', handleMove);
+      document.removeEventListener('touchend', handleEnd);
     };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleEnd);
+    document.addEventListener('touchmove', handleMove, { passive: false });
+    document.addEventListener('touchend', handleEnd);
   };
 
   /**
@@ -403,48 +441,39 @@ export default function EditPDF() {
   const handleLineResizeStart = (e, elId, endpoint) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    const startX = e.clientX;
-    const startY = e.clientY;
+
+    const getXY = (ev) => ev.touches?.length
+      ? { x: ev.touches[0].clientX, y: ev.touches[0].clientY }
+      : { x: ev.clientX, y: ev.clientY };
+
+    const { x: startX, y: startY } = getXY(e);
     const el = elements.find((item) => item.id === elId);
     if (!el) return;
-    
-    const initialX = endpoint === 'x1' ? el.x1 : el.x2;
-    const initialY = endpoint === 'y1' ? el.y1 : el.y2;
+    const iX = endpoint === 'x1' ? el.x1 : el.x2;
+    const iY = endpoint === 'y1' ? el.y1 : el.y2;
 
-    const handleMouseMove = (moveEvent) => {
-      const dx = moveEvent.clientX - startX;
-      const dy = moveEvent.clientY - startY;
-
-      setElements((prev) =>
-        prev.map((item) => {
-          if (item.id === elId) {
-            if (endpoint === 'x1') {
-              return {
-                ...item,
-                x1: initialX + dx,
-                y1: initialY + dy
-              };
-            } else {
-              return {
-                ...item,
-                x2: initialX + dx,
-                y2: initialY + dy
-              };
-            }
-          }
-          return item;
-        })
-      );
+    const handleMove = (mv) => {
+      if (mv.cancelable) mv.preventDefault();
+      const { x, y } = getXY(mv);
+      const dx = (x - startX) / zoom;
+      const dy = (y - startY) / zoom;
+      setElements((prev) => prev.map((item) => {
+        if (item.id !== elId) return item;
+        return endpoint === 'x1'
+          ? { ...item, x1: iX+dx, y1: iY+dy }
+          : { ...item, x2: iX+dx, y2: iY+dy };
+      }));
     };
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+    const handleEnd = () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleEnd);
+      document.removeEventListener('touchmove', handleMove);
+      document.removeEventListener('touchend', handleEnd);
     };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleEnd);
+    document.addEventListener('touchmove', handleMove, { passive: false });
+    document.addEventListener('touchend', handleEnd);
   };
 
   /* ────────────────────────────────────────────────────────────────────────
@@ -476,8 +505,9 @@ export default function EditPDF() {
     const overlayEl = overlaysRef.current[pageNum];
     if (!overlayEl) return;
     const rect = overlayEl.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // Divide by zoom: getBoundingClientRect returns zoomed dimensions
+    const x = (e.clientX - rect.left) / zoom;
+    const y = (e.clientY - rect.top) / zoom;
 
     const newElId = `el-${Date.now()}`;
     const coords = { x, y, page: pageNum };
@@ -572,12 +602,14 @@ export default function EditPDF() {
   };
 
   /**
-   * Converts drawn vector coordinates from canvas pad into signature overlay block.
+   * Reads the native canvas as a PNG data-URL and adds the signature overlay.
    */
   const handleInsertSignature = () => {
-    if (sigCanvasRef.current.isEmpty()) return;
+    if (sigIsEmpty) return;
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return;
 
-    const base64 = sigCanvasRef.current.getTrimmedCanvas().toDataURL('image/png');
+    const base64 = canvas.toDataURL('image/png');
     const { x, y, page: pageNum } = placementCoords || { x: 50, y: 50, page: 1 };
 
     const w = 120;
@@ -1107,6 +1139,27 @@ export default function EditPDF() {
                   Go
                 </button>
               </div>
+
+              <div className="hidden sm:block h-4 w-px bg-white/10" />
+
+              {/* Zoom controls */}
+              <div className="flex items-center space-x-1.5">
+                <button
+                  onClick={() => setZoom(z => Math.max(0.5, parseFloat((z - 0.25).toFixed(2))))}
+                  className="w-7 h-7 flex items-center justify-center rounded border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 text-sm font-bold transition-all"
+                  title="Zoom out"
+                >−</button>
+                <button
+                  onClick={() => setZoom(1)}
+                  className="px-2 py-0.5 rounded border border-white/10 text-[11px] text-slate-300 hover:text-white hover:bg-white/10 font-mono transition-all min-w-[46px] text-center"
+                  title="Reset zoom"
+                >{Math.round(zoom * 100)}%</button>
+                <button
+                  onClick={() => setZoom(z => Math.min(3, parseFloat((z + 0.25).toFixed(2))))}
+                  className="w-7 h-7 flex items-center justify-center rounded border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 text-sm font-bold transition-all"
+                  title="Zoom in"
+                >+</button>
+              </div>
             </div>
 
             {rendering && (
@@ -1130,9 +1183,18 @@ export default function EditPDF() {
                     key={pageNum}
                     id={`pdf-page-container-${pageNum}`}
                     data-page={pageNum}
-                    className="relative border border-slate-700/50 rounded-lg shadow-2xl bg-white select-none overflow-hidden flex-shrink-0 mb-6"
-                    style={{ width: `${width}px`, height: `${height}px` }}
+                    className="relative flex-shrink-0 mb-6"
+                    style={{ width: `${width * zoom}px`, height: `${height * zoom}px` }}
                   >
+                    <div
+                      className="absolute top-0 left-0 border border-slate-700/50 rounded-lg shadow-2xl bg-white select-none overflow-hidden"
+                      style={{
+                        width: `${width}px`,
+                        height: `${height}px`,
+                        transform: `scale(${zoom})`,
+                        transformOrigin: 'top left'
+                      }}
+                    >
                     <canvas 
                       ref={(el) => { canvasesRef.current[pageNum] = el; }} 
                       className="block pointer-events-none" 
@@ -1168,12 +1230,14 @@ export default function EditPDF() {
                                   whiteSpace: 'nowrap'
                                 }}
                                 onMouseDown={(e) => handleElDragStart(e, el.id)}
+                                onTouchStart={(e) => handleElDragStart(e, el.id)}
                               >
                                 {el.text}
                                 {isSelected && (
                                   <div
                                     onMouseDown={(e) => handleElResizeStart(e, el.id)}
-                                    className="absolute bottom-[-4px] right-[-4px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
+                                    onTouchStart={(e) => handleElResizeStart(e, el.id)}
+                                    className="absolute bottom-[-4px] right-[-4px] w-4 h-4 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
                                     title="Drag to resize text font size"
                                   />
                                 )}
@@ -1196,16 +1260,18 @@ export default function EditPDF() {
                                   cursor: 'move'
                                 }}
                                 onMouseDown={(e) => handleElDragStart(e, el.id)}
+                                onTouchStart={(e) => handleElDragStart(e, el.id)}
                               >
-                                <img 
-                                  src={el.imageBuffer} 
-                                  alt="embedded" 
-                                  className="w-full h-full pointer-events-none object-contain" 
+                                <img
+                                  src={el.imageBuffer}
+                                  alt="embedded"
+                                  className="w-full h-full pointer-events-none object-contain"
                                 />
                                 {isSelected && (
                                   <div
                                     onMouseDown={(e) => handleElResizeStart(e, el.id)}
-                                    className="absolute bottom-[-4px] right-[-4px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
+                                    onTouchStart={(e) => handleElResizeStart(e, el.id)}
+                                    className="absolute bottom-[-4px] right-[-4px] w-4 h-4 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
                                     title="Drag to resize dimensions"
                                   />
                                 )}
@@ -1231,11 +1297,13 @@ export default function EditPDF() {
                                     cursor: 'move'
                                   }}
                                   onMouseDown={(e) => handleElDragStart(e, el.id)}
+                                  onTouchStart={(e) => handleElDragStart(e, el.id)}
                                 >
                                   {isSelected && (
                                     <div
                                       onMouseDown={(e) => handleElResizeStart(e, el.id)}
-                                      className="absolute bottom-[-4px] right-[-4px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
+                                      onTouchStart={(e) => handleElResizeStart(e, el.id)}
+                                      className="absolute bottom-[-4px] right-[-4px] w-4 h-4 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
                                       title="Drag to resize dimensions"
                                     />
                                   )}
@@ -1260,11 +1328,13 @@ export default function EditPDF() {
                                     cursor: 'move'
                                   }}
                                   onMouseDown={(e) => handleElDragStart(e, el.id)}
+                                  onTouchStart={(e) => handleElDragStart(e, el.id)}
                                 >
                                   {isSelected && (
                                     <div
                                       onMouseDown={(e) => handleElResizeStart(e, el.id)}
-                                      className="absolute bottom-[0px] right-[0px] w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
+                                      onTouchStart={(e) => handleElResizeStart(e, el.id)}
+                                      className="absolute bottom-[0px] right-[0px] w-4 h-4 bg-violet-600 rounded-full border border-white cursor-se-resize z-30"
                                       title="Drag to resize radius"
                                     />
                                   )}
@@ -1291,6 +1361,7 @@ export default function EditPDF() {
                                     cursor: 'move'
                                   }}
                                   onMouseDown={(e) => handleElDragStart(e, el.id)}
+                                  onTouchStart={(e) => handleElDragStart(e, el.id)}
                                 >
                                   <svg className="w-full h-full pointer-events-none">
                                     <line
@@ -1306,22 +1377,16 @@ export default function EditPDF() {
                                     <>
                                       <div
                                         onMouseDown={(e) => handleLineResizeStart(e, el.id, 'x1')}
-                                        style={{
-                                          position: 'absolute',
-                                          left: `${el.x1 - xMin + el.thickness - 4}px`,
-                                          top: `${el.y1 - yMin + el.thickness - 4}px`,
-                                        }}
-                                        className="w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-pointer z-30"
+                                        onTouchStart={(e) => handleLineResizeStart(e, el.id, 'x1')}
+                                        style={{ position:'absolute', left:`${el.x1-xMin+el.thickness-8}px`, top:`${el.y1-yMin+el.thickness-8}px` }}
+                                        className="w-4 h-4 bg-violet-600 rounded-full border border-white cursor-pointer z-30"
                                         title="Drag start point"
                                       />
                                       <div
                                         onMouseDown={(e) => handleLineResizeStart(e, el.id, 'x2')}
-                                        style={{
-                                          position: 'absolute',
-                                          left: `${el.x2 - xMin + el.thickness - 4}px`,
-                                          top: `${el.y2 - yMin + el.thickness - 4}px`,
-                                        }}
-                                        className="w-2.5 h-2.5 bg-violet-600 rounded-full border border-white cursor-pointer z-30"
+                                        onTouchStart={(e) => handleLineResizeStart(e, el.id, 'x2')}
+                                        style={{ position:'absolute', left:`${el.x2-xMin+el.thickness-8}px`, top:`${el.y2-yMin+el.thickness-8}px` }}
+                                        className="w-4 h-4 bg-violet-600 rounded-full border border-white cursor-pointer z-30"
                                         title="Drag end point"
                                       />
                                     </>
@@ -1335,6 +1400,7 @@ export default function EditPDF() {
                         })}
                     </div>
                   </div>
+                </div>
                 );
               })}
             </div>
@@ -1362,26 +1428,35 @@ export default function EditPDF() {
               </button>
             </div>
             <div className="p-6">
+              {/* Native canvas drawing pad — no external dependency, React 19 safe */}
               <div className="border border-white/10 bg-white rounded-lg p-1 mb-4 overflow-hidden">
-                <SignatureCanvas
+                <canvas
                   ref={sigCanvasRef}
-                  penColor="black"
-                  canvasProps={{
-                    className: 'w-full h-40 bg-white cursor-crosshair'
-                  }}
+                  width={400}
+                  height={160}
+                  style={{ width: '100%', height: '160px', display: 'block', cursor: 'crosshair', touchAction: 'none' }}
+                  className="bg-white"
+                  onMouseDown={sigHandleStart}
+                  onMouseMove={sigHandleMove}
+                  onMouseUp={sigHandleEnd}
+                  onMouseLeave={sigHandleEnd}
+                  onTouchStart={sigHandleStart}
+                  onTouchMove={sigHandleMove}
+                  onTouchEnd={sigHandleEnd}
                 />
               </div>
-              
+
               <div className="flex items-center space-x-3">
                 <button
-                  onClick={() => sigCanvasRef.current.clear()}
+                  onClick={clearSigPad}
                   className="flex-1 py-2 text-xs font-semibold uppercase tracking-wider text-dark-300 hover:text-white border border-white/5 rounded-lg hover:bg-white/5 transition-all"
                 >
                   Clear Pad
                 </button>
                 <button
                   onClick={handleInsertSignature}
-                  className="flex-1 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-gradient-to-r from-brand-600 to-brand-500 rounded-lg hover:from-brand-500 hover:to-brand-600 transition-all shadow-md shadow-brand-500/20"
+                  disabled={sigIsEmpty}
+                  className="flex-1 py-2 text-xs font-semibold uppercase tracking-wider text-white bg-gradient-to-r from-brand-600 to-brand-500 rounded-lg hover:from-brand-500 hover:to-brand-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md shadow-brand-500/20"
                 >
                   Insert
                 </button>
