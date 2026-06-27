@@ -1,7 +1,10 @@
 import axios from 'axios';
 
+const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: API_BASE,
+  withCredentials: false,
 });
 
 // Response interceptor to handle Blob errors (status 400/500 returns error as JSON inside a Blob)
@@ -96,54 +99,54 @@ export const downloadBlob = (response, defaultFilename) => {
 export const mergePDFs = (files) => {
   const formData = new FormData();
   files.forEach((file) => formData.append('files', file));
-  return api.post('/pdf/merge', formData, { responseType: 'blob' });
+  return api.post('/api/pdf/merge', formData, { responseType: 'blob' });
 };
 
 export const splitPDF = (file, splitPages) => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('splitPages', splitPages);
-  return api.post('/pdf/split', formData, { responseType: 'blob' });
+  return api.post('/api/pdf/split', formData, { responseType: 'blob' });
 };
 
 export const organizePDF = (file, operations) => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('operations', JSON.stringify(operations));
-  return api.post('/pdf/organize', formData, { responseType: 'blob' });
+  return api.post('/api/pdf/organize', formData, { responseType: 'blob' });
 };
 
 export const editPDF = (file, elements) => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('elements', JSON.stringify(elements));
-  return api.post('/pdf/edit', formData, { responseType: 'blob' });
+  return api.post('/api/pdf/edit', formData, { responseType: 'blob' });
 };
 
 export const convertWordToPdf = (file) => {
   const formData = new FormData();
   formData.append('file', file);
-  return api.post('/convert/word-to-pdf', formData, { responseType: 'blob' });
+  return api.post('/api/convert/word-to-pdf', formData, { responseType: 'blob' });
 };
 
 export const convertPdfToWord = (file) => {
   const formData = new FormData();
   formData.append('file', file);
-  return api.post('/convert/pdf-to-word', formData, { responseType: 'blob' });
+  return api.post('/api/convert/pdf-to-word', formData, { responseType: 'blob' });
 };
 
 export const protectPDF = (file, password) => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('password', password);
-  return api.post('/secure/protect', formData, { responseType: 'blob' });
+  return api.post('/api/secure/protect', formData, { responseType: 'blob' });
 };
 
 export const unlockPDF = (file, password) => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('password', password);
-  return api.post('/secure/unlock', formData, { responseType: 'blob' });
+  return api.post('/api/secure/unlock', formData, { responseType: 'blob' });
 };
 
 export default api;
