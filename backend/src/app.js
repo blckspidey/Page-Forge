@@ -1,36 +1,67 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import pdfRoutes from './routes/pdf.routes.js';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import passport from 'passport';
+
+import { configurePassport } from './config/passport.js';
+import pdfRoutes     from './routes/pdf.routes.js';
 import convertRoutes from './routes/convert.routes.js';
-import secureRoutes from './routes/secure.routes.js';
+import secureRoutes  from './routes/secure.routes.js';
+import authRoutes    from './routes/auth.routes.js';
+import historyRoutes from './routes/history.routes.js';
+
+// ─── Initialize Passport Google Strategy ─────────────────────────────────────
+configurePassport();
 
 const app = express();
 
-// Middlewares
-app.use(cors({
-  origin: '*', // Allow all origins for local dev/testing
-  exposedHeaders: ['Content-Disposition']
+// ─── Security Headers ─────────────────────────────────────────────────────────
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
-// Increase JSON body limits to support base64 signatures/images
+// ─── CORS ─────────────────────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow requests with no origin (curl, mobile apps, Postman)
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS: origin ${origin} not allowed`), false);
+  },
+  credentials: true,    // Required for cookies to flow cross-origin
+  exposedHeaders: ['Content-Disposition'],
+}));
+
+// ─── Middlewares ──────────────────────────────────────────────────────────────
+app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(passport.initialize());
 
-// Health check endpoint
+// ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'OK', message: 'Page Forge API is healthy.' });
+  res.status(200).json({ status: 'OK', message: 'Page Forge API is healthy.', version: 'v2' });
 });
 
-// Routing
-app.use('/api/pdf', pdfRoutes);
+// ─── Routes ───────────────────────────────────────────────────────────────────
+app.use('/api/auth',    authRoutes);
+app.use('/api/history', historyRoutes);
+app.use('/api/pdf',     pdfRoutes);
 app.use('/api/convert', convertRoutes);
-app.use('/api/secure', secureRoutes);
+app.use('/api/secure',  secureRoutes);
 
-// Global Error Handler
+// ─── Global Error Handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error('Unhandled Global Error:', err);
   res.status(err.status || 500).json({
-    error: err.message || 'An unexpected error occurred on the server.'
+    error: err.message || 'An unexpected error occurred on the server.',
   });
 });
 

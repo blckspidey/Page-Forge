@@ -4,7 +4,7 @@ const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:5000').repla
 
 const api = axios.create({
   baseURL: API_BASE,
-  withCredentials: false,
+  withCredentials: true,   // Required: sends HTTP-only auth cookies cross-origin
 });
 
 // Response interceptor to handle Blob errors (status 400/500 returns error as JSON inside a Blob)
