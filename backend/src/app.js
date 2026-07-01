@@ -3,17 +3,12 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
-import passport from 'passport';
 
-import { configurePassport } from './config/passport.js';
 import pdfRoutes     from './routes/pdf.routes.js';
 import convertRoutes from './routes/convert.routes.js';
 import secureRoutes  from './routes/secure.routes.js';
 import authRoutes    from './routes/auth.routes.js';
 import historyRoutes from './routes/history.routes.js';
-
-// ─── Initialize Passport Google Strategy ─────────────────────────────────────
-configurePassport();
 
 const app = express();
 
@@ -31,11 +26,10 @@ const ALLOWED_ORIGINS = [
 
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow requests with no origin (curl, mobile apps, Postman)
     if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
     return cb(new Error(`CORS: origin ${origin} not allowed`), false);
   },
-  credentials: true,    // Required for cookies to flow cross-origin
+  credentials: true,
   exposedHeaders: ['Content-Disposition'],
 }));
 
@@ -43,7 +37,6 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(passport.initialize());
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {

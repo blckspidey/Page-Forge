@@ -23,7 +23,7 @@ const aiItems = [
 export default function Navbar() {
   const location              = useLocation();
   const navigate              = useNavigate();
-  const { user, logout }      = useAuth();
+  const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [aiMenuOpen, setAiMenuOpen]     = useState(false);

@@ -1,5 +1,4 @@
 import bcrypt from 'bcryptjs';
-import passport from 'passport';
 import { db } from '../config/db.js';
 import { users } from '../schema/index.js';
 import { eq } from 'drizzle-orm';
@@ -22,7 +21,6 @@ export const register = async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     }
 
-    // Check if user already exists
     const [existing] = await db.select().from(users).where(eq(users.email, email));
     if (existing) {
       return res.status(409).json({ error: 'An account with this email already exists.' });
@@ -32,7 +30,7 @@ export const register = async (req, res) => {
 
     const [user] = await db
       .insert(users)
-      .values({ email, password: hashedPassword, name, provider: 'email' })
+      .values({ email, password: hashedPassword, name })
       .returning({ id: users.id, email: users.email, name: users.name, createdAt: users.createdAt });
 
     const tokens = generateTokens(user);
@@ -61,12 +59,6 @@ export const login = async (req, res) => {
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password.' });
-    }
-
-    if (!user.password) {
-      return res.status(401).json({
-        error: 'This account uses Google Sign-In. Please login with Google.',
-      });
     }
 
     const isValid = await bcrypt.compare(password, user.password);
@@ -133,20 +125,5 @@ export const getMe = async (req, res) => {
     return res.json({ user });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to fetch user.' });
-  }
-};
-
-// ─── Google OAuth Callback Handler ────────────────────────────────────────────
-export const googleCallback = (req, res) => {
-  try {
-    const tokens = generateTokens(req.user);
-    setAuthCookies(res, tokens);
-
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    return res.redirect(`${frontendUrl}/auth/callback?success=true`);
-  } catch (err) {
-    console.error('[Auth] Google callback error:', err);
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    return res.redirect(`${frontendUrl}/auth/callback?error=oauth_failed`);
   }
 };

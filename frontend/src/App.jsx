@@ -15,9 +15,8 @@ const SecurePDF   = lazy(() => import('./pages/SecurePDF'));
 const NotFound    = lazy(() => import('./pages/NotFound'));
 
 // ─── Auth Pages ───────────────────────────────────────────────────────────────
-const Login        = lazy(() => import('./pages/Login'));
-const Register     = lazy(() => import('./pages/Register'));
-const AuthCallback = lazy(() => import('./pages/AuthCallback'));
+const Login    = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
 
 // ─── Protected Pages ──────────────────────────────────────────────────────────
 const History      = lazy(() => import('./pages/History'));
@@ -59,9 +58,8 @@ function App() {
                 <Route path="/secure"   element={<SecurePDF />} />
 
                 {/* ── Auth ── */}
-                <Route path="/login"          element={<Login />} />
-                <Route path="/register"       element={<Register />} />
-                <Route path="/auth/callback"  element={<AuthCallback />} />
+                <Route path="/login"    element={<Login />} />
+                <Route path="/register" element={<Register />} />
 
                 {/* ── Protected ── */}
                 <Route path="/history"   element={<ProtectedRoute><History /></ProtectedRoute>} />
