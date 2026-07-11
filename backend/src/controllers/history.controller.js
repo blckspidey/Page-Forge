@@ -16,15 +16,14 @@ export const getHistory = async (req, res) => {
       let fileUrl = entry.file_url;
       // If S3 is active and the stored file_url is a relative S3 key (doesn't start with http/https)
       if (s3Active && fileUrl && !fileUrl.startsWith('http')) {
-        const presigned = await getPresignedUrl(fileUrl);
-        if (presigned) {
-          fileUrl = presigned;
+        try {
+          const presigned = await getPresignedUrl(fileUrl);
+          if (presigned) fileUrl = presigned;
+        } catch (_) {
+          // Non-critical: fall back to raw key if presigning fails
         }
       }
-      return {
-        ...entry,
-        file_url: fileUrl
-      };
+      return { ...entry, file_url: fileUrl };
     }));
 
     return res.json({ history: historyWithUrls });
