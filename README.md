@@ -1,425 +1,582 @@
-# 📄 Page Forge — PDF Toolkit
+# PageForge — AI-Powered PDF Toolkit
 
-> A full-stack, production-ready PDF toolkit that runs entirely in the browser for rendering and in Node.js for processing. Edit, convert, merge, split, organize, and secure PDF documents with a premium, mobile-responsive interface.
+> A full-stack, production-grade PDF processing platform with an AI document assistant, built with React, Node.js, PostgreSQL (Neon), and AWS S3. Deployed on AWS EC2 with Docker and CI/CD via GitHub Actions.
 
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Node](https://img.shields.io/badge/node-%3E%3D20-green)
-![React](https://img.shields.io/badge/react-19-61dafb)
-![Vite](https://img.shields.io/badge/vite-8-646cff)
+**Live Demo:** [https://pageforge.ganeshdev.me](https://pageforge.ganeshdev.me)  
+**API Base:** [https://api.pageforge.ganeshdev.me](https://api.pageforge.ganeshdev.me)
 
 ---
 
-## 📑 Table of Contents
+## Table of Contents
 
-- [Features](#-features)
-- [Tech Stack](#-tech-stack)
-- [Project Structure](#-project-structure)
-- [Getting Started (Local Dev)](#-getting-started-local-dev)
-- [Environment Variables](#-environment-variables)
-- [API Reference](#-api-reference)
-- [Deployment](#-deployment)
-- [Architecture Overview](#-architecture-overview)
-- [Key Design Decisions](#-key-design-decisions)
-- [Contributing](#-contributing)
-
----
-
-## ✨ Features
-
-### 📝 Edit PDF
-Interactive canvas-based PDF editor. Upload any PDF and overlay custom elements onto any page.
-
-| Capability | Details |
-|---|---|
-| **Text overlay** | Custom font, size, and color; drag to reposition |
-| **Shape overlay** | Rectangle, circle, and line with custom stroke color/thickness and optional fill |
-| **Image embed** | Upload PNG/JPG and place it anywhere on the page |
-| **Signature pad** | Native HTML5 canvas drawing pad (no external dependency) — mouse & touch supported |
-| **Drag & move** | Mouse and touch drag for all element types |
-| **Resize handles** | Corner dots on every element — drag to resize (touch-enabled, 16×16 px hit target) |
-| **Zoom** | `−` / `+` / percentage reset in sticky nav bar; range 50 %–300 % in 25 % steps |
-| **Multi-page** | Renders all pages simultaneously; scroll detection auto-tracks current page |
-| **Export** | Sends overlay data to the backend; receives a processed PDF via `pdf-lib` |
-
-### 🔄 Convert PDF
-| Direction | Method |
-|---|---|
-| **PDF → Word (.docx)** | `pdf-parse` extracts the text layer; `docx` library assembles a `.docx` file |
-| **Word (.docx) → PDF** | Windows: PowerShell + Microsoft Word COM automation; Linux/Docker: LibreOffice headless |
-
-### 🔀 Merge PDF
-Upload multiple PDFs and merge them into a single document in the order you choose. Uses `pdf-lib` to copy pages between documents.
-
-### ✂️ Split PDF
-Upload a PDF and split it into individual pages or custom page ranges. Each range is packaged as a separate PDF file; multiple outputs are bundled into a `.zip` archive using `archiver`.
-
-### 🗂️ Organize PDF
-Drag-and-drop page reordering. Renders page thumbnails using `pdfjs-dist`; submits the new page order to the backend which rebuilds the document with `pdf-lib`.
-
-### 🔐 Secure PDF
-| Mode | Details |
-|---|---|
-| **Encrypt** | Password-protect a PDF using `@pdfsmaller/pdf-encrypt` (AES-256) |
-| **Decrypt** | Remove password protection with `@pdfsmaller/pdf-decrypt` given the correct password |
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Architecture Overview](#architecture-overview)
+- [API Reference](#api-reference)
+- [Environment Variables](#environment-variables)
+- [Local Development](#local-development)
+- [Production Deployment](#production-deployment)
+- [CI/CD Pipeline](#cicd-pipeline)
+- [Database Schema](#database-schema)
 
 ---
 
-## 🛠 Tech Stack
+## Features
+
+### PDF Toolkit (No login required)
+| Feature | Description |
+|---|---|
+| **Merge PDFs** | Combine multiple PDF files into one document |
+| **Split PDF** | Extract specific page ranges into separate files or a ZIP archive |
+| **Organize Pages** | Reorder, rotate, delete, and insert blank pages with drag-and-drop |
+| **Edit PDF** | Overlay text, images, signatures, and shapes onto any PDF page |
+| **Convert Word → PDF** | Convert `.docx` files to PDF using LibreOffice (Linux/Docker) |
+| **Convert PDF → Word** | Extract text from a PDF and package it as a `.docx` file |
+| **Protect PDF** | Password-encrypt a PDF using 256-bit AES via `qpdf` |
+| **Unlock PDF** | Remove password protection from a PDF given the correct password |
+
+### AI Features (Login required)
+| Feature | Description |
+|---|---|
+| **PDF Summarizer** | Upload a PDF and receive a structured AI-generated summary with key points, dates, action items, and FAQs |
+| **Chat with PDF** | RAG-based conversational AI — embed a PDF into a vector database and chat with it using natural language |
+| **Persistent Sessions** | All chat sessions are stored in PostgreSQL and PDF files in AWS S3 |
+
+### Authentication
+- Email/password registration and login with JWT (access + refresh tokens)
+- Google OAuth 2.0 via Passport.js
+- HTTP-only cookie-based token storage
+- Optional authentication on PDF tools (logged-in users get history tracking)
+
+### History
+- Every PDF operation is logged per-user in the database
+- Output files are uploaded to S3 with 24-hour presigned download URLs
+- History page displays all past operations with re-download links
+
+---
+
+## Tech Stack
 
 ### Frontend
-| Package | Role |
+| Technology | Purpose |
 |---|---|
 | **React 19** | UI framework |
-| **Vite 8** | Dev server & bundler |
-| **Tailwind CSS v4 beta** | Utility-first styling |
+| **Vite** | Build tool and dev server |
 | **React Router v6** | Client-side routing |
-| **pdfjs-dist** | Client-side PDF rendering onto HTML5 canvas |
-| **pdf-lib** | Client-side PDF inspection (page dimensions) |
-| **Axios** | HTTP client with blob-error interceptor |
-| **Lucide React** | Icon set |
+| **Axios** | HTTP client with cookie support |
+| **TailwindCSS v4** | Utility-first CSS framework |
+| **PDF.js (pdfjs-dist)** | In-browser PDF rendering for the editor canvas |
+| **react-signature-canvas** | Signature drawing pad |
+| **react-markdown** | Renders AI responses as formatted markdown |
+| **Lucide React** | Icon library |
 
 ### Backend
-| Package | Role |
+| Technology | Purpose |
 |---|---|
-| **Express 4** | HTTP server & middleware |
-| **Multer** | Multipart file upload handling |
-| **pdf-lib** | PDF editing — overlay embedding, page manipulation |
-| **pdf-parse** | PDF text extraction (PDF → Word path) |
-| **docx** | `.docx` document generation |
-| **archiver** | ZIP packaging for split outputs |
-| **@pdfsmaller/pdf-encrypt / pdf-decrypt** | AES-256 PDF password protection |
-| **@aws-sdk/client-s3** | Optional S3 storage backend (falls back to local disk) |
-| **nodemon** | Dev auto-restart |
+| **Node.js 20 + Express** | REST API server |
+| **Prisma ORM** | Type-safe database access |
+| **Neon PostgreSQL** | Serverless Postgres with `pgvector` extension for embeddings |
+| **AWS S3 SDK v3** | Cloud file storage |
+| **@google/genai** | Google Gemini AI SDK (v1 stable endpoint) |
+| **pdf-lib** | PDF manipulation (edit, merge, split, organize) |
+| **pdf-parse** | PDF text extraction |
+| **LibreOffice (soffice)** | Word-to-PDF conversion on Linux/Docker |
+| **qpdf** | PDF encryption/decryption (256-bit AES) |
+| **docx** | Generates Word documents for PDF-to-Word conversion |
+| **Passport.js** | Google OAuth 2.0 strategy |
+| **JWT (jsonwebtoken)** | Access and refresh token issuance |
+| **Helmet** | HTTP security headers |
+| **Multer** | Multipart file upload handling (50MB limit) |
+| **bcryptjs** | Password hashing |
 
 ### Infrastructure
-| Tool | Role |
+| Technology | Purpose |
 |---|---|
-| **Docker** | Containerise the Node.js backend with LibreOffice pre-installed |
-| **Nginx** | Reverse proxy on EC2; handles gzip, large uploads (100 MB limit) |
+| **Docker** | Backend containerization |
+| **Docker Hub** | Container registry |
 | **AWS EC2** | Backend hosting |
-| **Vercel / Netlify** | Frontend static hosting |
-| **GitHub Actions** | CI/CD pipeline (see `.github/`) |
+| **Nginx** | Reverse proxy with SSL termination and 300s timeouts |
+| **Certbot / Let's Encrypt** | HTTPS SSL certificates |
+| **Vercel** | Frontend hosting with SPA rewrites |
+| **GitHub Actions** | CI/CD — builds Docker image and deploys to EC2 on every push to `main` or `v2` |
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 Page-Forge/
-├── frontend/                     # Vite + React SPA
-│   ├── src/
-│   │   ├── pages/
-│   │   │   ├── Dashboard.jsx     # Landing / tool selection
-│   │   │   ├── EditPDF.jsx       # Interactive PDF editor
-│   │   │   ├── ConvertPDF.jsx    # PDF ↔ Word conversion UI
-│   │   │   ├── MergePDF.jsx      # PDF merge UI
-│   │   │   ├── SplitPDF.jsx      # PDF split UI
-│   │   │   ├── OrganizePDF.jsx   # Drag-and-drop page organizer
-│   │   │   ├── SecurePDF.jsx     # Encrypt / decrypt UI
-│   │   │   └── NotFound.jsx      # 404 page
-│   │   ├── services/
-│   │   │   └── api.js            # Axios instance + all API helpers
-│   │   ├── App.jsx               # Router & layout
-│   │   └── index.css             # Tailwind + global design tokens
-│   ├── public/
-│   ├── vite.config.js
-│   └── package.json
-│
-├── backend/                      # Node.js + Express API
-│   ├── src/
-│   │   ├── server.js             # Entry point, port 5000
-│   │   ├── app.js                # Express app, CORS, routes
-│   │   ├── routes/
-│   │   │   ├── pdf.routes.js     # /api/pdf/*
-│   │   │   ├── convert.routes.js # /api/convert/*
-│   │   │   └── secure.routes.js  # /api/secure/*
-│   │   ├── controllers/
-│   │   │   ├── pdf.controller.js
-│   │   │   ├── convert.controller.js
-│   │   │   └── secure.controller.js
-│   │   ├── services/
-│   │   │   ├── edit.service.js       # PDF overlay embedding (pdf-lib)
-│   │   │   ├── merge.service.js      # PDF merge (pdf-lib)
-│   │   │   ├── split.service.js      # PDF split + ZIP (pdf-lib + archiver)
-│   │   │   ├── organize.service.js   # Page reorder (pdf-lib)
-│   │   │   ├── convert.service.js    # Word↔PDF conversion
-│   │   │   ├── secure.service.js     # Encrypt/decrypt
-│   │   │   └── s3.service.js         # AWS S3 helper (optional)
-│   │   └── middleware/
-│   │       └── upload.middleware.js  # Multer config (50 MB limit)
-│   ├── uploads/                  # Temp file storage (auto-created)
-│   ├── Dockerfile
-│   └── package.json
-│
-├── deployment/
-│   └── nginx.conf                # Production Nginx reverse-proxy config
-│
 ├── .github/
-│   └── workflows/                # GitHub Actions CI/CD
-│
-└── DEPLOYMENT.md                 # Full cloud deployment guide
+│   └── workflows/
+│       └── deploy.yml          # CI/CD: build Docker image, push to Hub, SSH deploy to EC2
+├── backend/
+│   ├── Dockerfile              # Node 20-slim + LibreOffice + qpdf
+│   ├── package.json
+│   ├── prisma/
+│   │   └── schema.prisma       # User, ChatSession, HistoryEntry models + pgvector
+│   └── src/
+│       ├── app.js              # Express app: CORS, helmet, routes, error handler
+│       ├── server.js           # HTTP server entry point
+│       ├── config/
+│       │   ├── db.js           # Prisma client (Neon serverless adapter)
+│       │   ├── env.js          # Environment variable validation
+│       │   ├── jwt.js          # Token sign/verify helpers
+│       │   └── passport.js     # Google OAuth strategy
+│       ├── controllers/
+│       │   ├── ai.controller.js       # Summarize, RAG upload, chat, sessions
+│       │   ├── auth.controller.js     # Register, login, logout, refresh, me
+│       │   ├── convert.controller.js  # Word→PDF, PDF→Word
+│       │   ├── history.controller.js  # Get history, add entry, presigned URLs
+│       │   ├── pdf.controller.js      # Merge, split, organize, edit
+│       │   └── secure.controller.js   # Protect, unlock
+│       ├── middleware/
+│       │   ├── auth.middleware.js     # authMiddleware, optionalAuth
+│       │   └── upload.middleware.js   # Multer config (50MB, PDF/DOCX/images)
+│       ├── routes/
+│       │   ├── ai.routes.js
+│       │   ├── auth.routes.js
+│       │   ├── convert.routes.js
+│       │   ├── history.routes.js
+│       │   ├── pdf.routes.js
+│       │   └── secure.routes.js
+│       └── services/
+│           ├── ai.service.js          # Gemini embeddings, summary, RAG stream
+│           ├── convert.service.js     # LibreOffice/PowerShell + docx builder
+│           ├── edit.service.js        # pdf-lib overlay engine
+│           ├── merge.service.js       # pdf-lib merge
+│           ├── organize.service.js    # pdf-lib reorder/rotate/delete/blank
+│           ├── s3.service.js          # S3 upload, delete, presigned URL
+│           ├── secure.service.js      # qpdf encrypt/decrypt + JS fallback
+│           └── split.service.js       # pdf-lib split + archiver ZIP
+├── deployment/
+│   └── nginx.conf              # Nginx reverse proxy template (HTTP→HTTPS, 300s timeouts)
+└── frontend/
+    ├── index.html
+    ├── vercel.json             # SPA rewrite: all routes → index.html
+    ├── vite.config.js
+    └── src/
+        ├── App.jsx             # Router + protected routes
+        ├── components/
+        │   ├── DropZone.jsx    # Drag-and-drop file upload
+        │   ├── PageHeader.jsx  # Page title + description
+        │   └── ProtectedRoute.jsx
+        ├── context/
+        │   └── AuthContext.jsx # Global auth state (user, login, logout)
+        ├── pages/
+        │   ├── Dashboard.jsx
+        │   ├── EditPDF.jsx     # Full canvas editor with PDF.js rendering
+        │   ├── OrganizePDF.jsx # Drag-and-drop page organizer
+        │   ├── MergePDF.jsx
+        │   ├── SplitPDF.jsx
+        │   ├── ConvertPDF.jsx
+        │   ├── SecurePDF.jsx
+        │   ├── Summarize.jsx   # AI PDF summarizer
+        │   ├── ChatPDF.jsx     # RAG chat interface with SSE streaming
+        │   ├── History.jsx
+        │   ├── Login.jsx
+        │   ├── Register.jsx
+        │   └── NotFound.jsx
+        └── services/
+            └── api.js          # Axios instance + all API call functions
 ```
 
 ---
 
-## 🚀 Getting Started (Local Dev)
-
-### Prerequisites
-- **Node.js ≥ 20**
-- **npm ≥ 9**
-- **Microsoft Word** (Windows only, for Word → PDF conversion)
-- **LibreOffice** (Linux/macOS, for Word → PDF conversion in Docker)
-
-### 1. Clone the repo
-
-```bash
-git clone https://github.com/your-username/Page-Forge.git
-cd Page-Forge
-```
-
-### 2. Start the backend
-
-```bash
-cd backend
-npm install
-npm run dev          # Starts nodemon on http://localhost:5000
-```
-
-### 3. Start the frontend
-
-```bash
-cd frontend
-npm install
-npm run dev          # Starts Vite on http://localhost:5173
-```
-
-> Both servers must be running. The Vite dev config proxies `/api` requests to `localhost:5000`.
-
-### 4. Open the app
+## Architecture Overview
 
 ```
-http://localhost:5173
+Browser (React/Vite on Vercel)
+        │
+        │ HTTPS (VITE_API_URL)
+        ▼
+Nginx (EC2 — api.pageforge.ganeshdev.me)
+  - SSL via Certbot / Let's Encrypt
+  - client_max_body_size 100M
+  - proxy timeouts 300s
+        │
+        │ proxy_pass → localhost:5000
+        ▼
+Docker Container (page-forge-backend)
+  Express API (Node.js 20)
+        │
+        ├── Neon PostgreSQL (via Prisma + @neondatabase/serverless)
+        │     - users, chat_sessions, history_entries tables
+        │     - pgvector extension for document embeddings
+        │
+        ├── AWS S3 (page-forge-toolkit-storage)
+        │     - uploads/chat-{sessionId}.pdf    (chat PDFs)
+        │     - outputs/edited-{ts}-{name}.pdf  (processed output files)
+        │
+        └── Google Gemini API (@google/genai SDK)
+              - gemini-2.0-flash    (summary + RAG chat)
+              - gemini-embedding-001 (768-dim vector embeddings)
 ```
+
+### Key Design Decisions
+
+1. **Optional Auth on PDF Tools** — All core PDF operations work without login. If a JWT cookie is present, the result is logged to user history.
+
+2. **S3 Presigned URLs** — S3 bucket is private. History entries store S3 keys, not public URLs. On history load, 24-hour presigned URLs are generated per entry. Single S3 failures don't crash the history list (wrapped in `try-catch`).
+
+3. **Awaited History Writes** — `addHistoryEntry()` is `await`ed before sending the file response. This ensures the database record is committed before the frontend receives the download and attempts to refresh history.
+
+4. **Streaming RAG Chat** — Gemini streams text via `generateContentStream`. The backend forwards chunks to the frontend using Server-Sent Events (SSE) with `text/event-stream`. The full response is saved to the chat session on completion.
+
+5. **Large File Support** — Nginx allows 100MB uploads and 300s proxy timeouts. The Axios `editPDF` call has a 5-minute timeout with `maxContentLength: Infinity`.
+
+6. **Word-to-PDF Platform Detection** — On Windows (dev), PowerShell + Microsoft Word COM automation is used. On Linux/Docker (production), LibreOffice `soffice --headless` is used.
 
 ---
 
-## 🔑 Environment Variables
+## API Reference
 
-Create a `.env` file inside `backend/` (see `.env.example`):
-
-```env
-# Server
-PORT=5000
-NODE_ENV=development
-
-# Gemini AI
-GEMINI_API_KEY=your_gemini_api_key_from_ai_studio
-GEMINI_TEXT_MODEL=gemini-3.1-flash-lite
-GEMINI_EMBEDDING_MODEL=gemini-embedding-001
-
-# AWS S3 (optional — omit to use local disk storage)
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
-S3_BUCKET_NAME=your_bucket_name
-```
-
-When the S3 variables are absent the backend falls back to local `uploads/` disk storage automatically.
-
----
-
-## 📡 API Reference
-
-All routes are prefixed with `/api`. File uploads use `multipart/form-data`. File downloads return binary responses (`application/pdf`, `application/zip`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`).
+### Auth — `/api/auth`
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| `POST` | `/register` | Public | Create account with email + password |
+| `POST` | `/login` | Public | Login, sets `access_token` + `refresh_token` cookies |
+| `POST` | `/logout` | Public | Clears auth cookies |
+| `POST` | `/refresh` | Public | Issues new access token from refresh token |
+| `GET` | `/me` | Required | Returns current user profile |
 
 ### PDF Operations — `/api/pdf`
+All endpoints accept `multipart/form-data` and support optional auth.
 
-| Method | Path | Body (form-data) | Description |
+| Method | Endpoint | Field(s) | Description |
 |---|---|---|---|
-| `POST` | `/merge` | `files[]` (multiple PDFs) | Merge PDFs in upload order |
-| `POST` | `/split` | `file` (PDF) | Split into individual pages; returns ZIP |
-| `POST` | `/organize` | `file` (PDF), `pageOrder` (JSON array) | Rebuild PDF with new page order |
-| `POST` | `/edit` | `file` (PDF), `elements` (JSON array) | Embed overlay elements; returns PDF |
+| `POST` | `/merge` | `files[]` (multiple PDFs) | Merge into one PDF |
+| `POST` | `/split` | `file`, `splitPages` (e.g. `"1-3, 5"`) | Split PDF by page ranges |
+| `POST` | `/organize` | `file`, `operations` (JSON array) | Reorder/rotate/delete/insert pages |
+| `POST` | `/edit` | `file`, `elements` (JSON array) | Overlay text/images/shapes/signatures |
 
-#### `elements` schema (for `/edit`)
+**Organize Operations Format:**
 ```json
 [
-  {
-    "type": "text",
-    "page": 1,
-    "x": 100, "y": 200,
-    "text": "Hello",
-    "fontSize": 18,
-    "fontFamily": "Helvetica",
-    "color": "#8b5cf6"
-  },
-  {
-    "type": "shape",
-    "shapeType": "rectangle",
-    "page": 1,
-    "x": 50, "y": 50,
-    "width": 200, "height": 100,
-    "color": "#ef4444",
-    "thickness": 2,
-    "fill": false
-  },
-  {
-    "type": "signature",
-    "page": 1,
-    "x": 80, "y": 300,
-    "width": 120, "height": 50,
-    "imageBuffer": "data:image/png;base64,..."
-  }
+  { "type": "reorder", "pages": [3, 1, 2] },
+  { "type": "rotate", "page": 1, "degrees": 90 },
+  { "type": "delete", "page": 4 },
+  { "type": "blank", "afterPage": 2 }
 ]
 ```
 
-### Conversion — `/api/convert`
-
-| Method | Path | Body | Response |
-|---|---|---|---|
-| `POST` | `/word-to-pdf` | `file` (.docx) | PDF binary |
-| `POST` | `/pdf-to-word` | `file` (.pdf) | .docx binary |
-
-> **Windows dev**: Word → PDF uses PowerShell + Microsoft Word COM automation (requires Word installed).  
-> **Linux/Docker**: Uses `soffice --headless` (LibreOffice, pre-installed in the Docker image).
-
-### Security — `/api/secure`
-
-| Method | Path | Body | Description |
-|---|---|---|---|
-| `POST` | `/encrypt` | `file` (PDF), `password` | AES-256 encrypt; returns PDF |
-| `POST` | `/decrypt` | `file` (PDF), `password` | Remove password; returns PDF |
-
-### Health Check
-
+**Edit Elements Format:**
+```json
+[
+  { "type": "text", "page": 1, "text": "Hello", "x": 100, "y": 200, "fontSize": 14, "fontFamily": "helvetica", "color": "#000000" },
+  { "type": "image", "page": 1, "imageBuffer": "data:image/png;base64,...", "x": 50, "y": 50, "width": 200, "height": 100 },
+  { "type": "signature", "page": 2, "imageBuffer": "data:image/png;base64,...", "x": 300, "y": 400, "width": 150, "height": 60 },
+  { "type": "shape", "page": 1, "shapeType": "rectangle", "x": 10, "y": 10, "width": 100, "height": 50, "thickness": 2, "fill": false, "color": "#ff0000" }
+]
 ```
-GET /api/health  →  200 { status: "ok" }
+
+### Convert — `/api/convert`
+| Method | Endpoint | Field | Description |
+|---|---|---|---|
+| `POST` | `/word-to-pdf` | `file` (.docx) | Convert Word document to PDF |
+| `POST` | `/pdf-to-word` | `file` (.pdf) | Extract text and export as .docx |
+
+### Secure — `/api/secure`
+| Method | Endpoint | Fields | Description |
+|---|---|---|---|
+| `POST` | `/protect` | `file`, `password` | Encrypt PDF with 256-bit AES password |
+| `POST` | `/unlock` | `file`, `password` | Remove PDF password protection |
+
+### AI — `/api/ai` (Login required)
+| Method | Endpoint | Fields | Description |
+|---|---|---|---|
+| `POST` | `/summarize` | `file` (.pdf) | Generate structured JSON summary |
+| `POST` | `/chat/upload` | `file` (.pdf) | Embed PDF into vector DB, create session |
+| `POST` | `/chat/message` | `sessionId`, `question` | Stream AI answer via SSE |
+| `GET` | `/chat/sessions` | — | List all chat sessions |
+| `GET` | `/chat/sessions/:id` | — | Get session with messages and PDF URL |
+| `DELETE` | `/chat/sessions/:id` | — | Delete session + S3 PDF file |
+
+### History — `/api/history` (Login required)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/` | Get all history entries with S3 presigned download URLs |
+
+---
+
+## Environment Variables
+
+Create `backend/.env`:
+
+```env
+# ── Server ──────────────────────────────────────────────
+PORT=5000
+NODE_ENV=production
+FRONTEND_URL=https://pageforge.ganeshdev.me
+
+# ── Database (Neon PostgreSQL) ───────────────────────────
+DATABASE_URL=postgresql://user:password@ep-xxx.neon.tech/neondb?sslmode=require
+
+# ── JWT ──────────────────────────────────────────────────
+JWT_SECRET=your_super_secret_jwt_key_min_32_chars
+JWT_REFRESH_SECRET=your_super_secret_refresh_key
+JWT_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=7d
+
+# ── AWS S3 ───────────────────────────────────────────────
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_REGION=ap-south-1
+S3_BUCKET_NAME=page-forge-toolkit-storage
+
+# ── Google Gemini AI ─────────────────────────────────────
+GEMINI_API_KEY=AIza...
+
+# ── Google OAuth (optional) ──────────────────────────────
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_CALLBACK_URL=https://api.pageforge.ganeshdev.me/api/auth/google/callback
+```
+
+Create `frontend/.env`:
+```env
+VITE_API_URL=https://api.pageforge.ganeshdev.me
+```
+
+### AWS IAM Permissions Required
+
+The IAM user needs the following S3 policy on `arn:aws:s3:::page-forge-toolkit-storage/*`:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "s3:PutObject",
+    "s3:GetObject",
+    "s3:DeleteObject",
+    "s3:GetObjectAcl"
+  ],
+  "Resource": "arn:aws:s3:::page-forge-toolkit-storage/*"
+}
 ```
 
 ---
 
-## ☁️ Deployment
+## Local Development
 
-See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for the full step-by-step guide. Summary:
+### Prerequisites
+- Node.js 20+
+- `qpdf` installed (for PDF encryption locally)
+- A Neon PostgreSQL database URL
+- Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
 
-### Backend → AWS EC2 + Docker
+### 1. Clone and install
+
+```bash
+git clone https://github.com/blckspidey/Page-Forge.git
+cd Page-Forge
+
+# Install backend dependencies
+cd backend && npm install
+
+# Install frontend dependencies
+cd ../frontend && npm install
+```
+
+### 2. Set up database
+
+```bash
+cd backend
+
+# Push schema to Neon
+npx prisma db push
+
+# Generate Prisma client
+npx prisma generate
+```
+
+### 3. Run development servers
+
+```bash
+# Terminal 1 — Backend (runs on port 5000)
+cd backend && npm run dev
+
+# Terminal 2 — Frontend (runs on port 5173)
+cd frontend && npm run dev
+```
+
+Frontend will be at `http://localhost:5173` and proxy API calls to `http://localhost:5000`.
+
+---
+
+## Production Deployment
+
+### Docker Image (Backend)
 
 ```bash
 # Build image
-docker build -t page-forge-backend ./backend
+docker build -t yourdockerhub/page-forge-backend:latest ./backend
 
-# Run container (maps host :5000 → container :5000)
-docker run -d -p 5000:5000 \
-  -e NODE_ENV=production \
-  -e AWS_REGION=... \
-  page-forge-backend
+# Push to Docker Hub
+docker push yourdockerhub/page-forge-backend:latest
 ```
 
-The Docker image (`node:20-slim`) pre-installs **LibreOffice Writer** and **qpdf** so Word → PDF and PDF encryption work out-of-the-box on Linux.
-
-### Nginx (reverse proxy)
-
-Copy `deployment/nginx.conf` to `/etc/nginx/sites-available/page-forge` on the EC2 host and symlink it to `sites-enabled`. Update `server_name` to your domain or public IP.
-
-Key settings:
-- `client_max_body_size 100M` — allows large PDF uploads
-- Gzip enabled for JSON, JS, CSS payloads
-- Proxy passes all traffic to `127.0.0.1:5000`
-
-### Frontend → Vercel / Netlify
+### EC2 Deployment
 
 ```bash
-cd frontend
-npm run build        # Outputs to dist/
+# On EC2 — pull and run the container
+docker pull yourdockerhub/page-forge-backend:latest
+
+docker run -d \
+  --name page-forge-backend \
+  -p 5000:5000 \
+  --restart always \
+  -v /var/www/uploads:/usr/src/app/uploads \
+  --env-file /home/ubuntu/.env \
+  yourdockerhub/page-forge-backend:latest
 ```
 
-Set the environment variable `VITE_API_BASE_URL` to your EC2 backend URL (e.g. `https://api.yourdomain.com`) before building.
+### Nginx Configuration (`/etc/nginx/sites-available/pageforge`)
 
-### GitHub Actions CI/CD
+```nginx
+server {
+    server_name api.pageforge.ganeshdev.me;
 
-`.github/workflows/` contains pipelines that:
-1. Run `npm install` and lint on every PR
-2. Build and push the Docker image to ECR on merge to `main`
-3. SSH into EC2 and restart the container
+    client_max_body_size 100M;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Large PDF processing can take minutes
+        proxy_connect_timeout       300s;
+        proxy_send_timeout          300s;
+        proxy_read_timeout          300s;
+        send_timeout                300s;
+    }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/api.pageforge.ganeshdev.me/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.pageforge.ganeshdev.me/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+}
+
+server {
+    if ($host = api.pageforge.ganeshdev.me) {
+        return 301 https://$host$request_uri;
+    }
+    listen 80;
+    server_name api.pageforge.ganeshdev.me;
+    return 404;
+}
+```
+
+```bash
+sudo nginx -t && sudo systemctl restart nginx
+```
+
+### Frontend (Vercel)
+
+1. Import the GitHub repo into Vercel
+2. Set root directory to `frontend`
+3. Set environment variable: `VITE_API_URL=https://api.pageforge.ganeshdev.me`
+4. Deploy — Vercel auto-deploys on every push to `main`
 
 ---
 
-## 🏗 Architecture Overview
+## CI/CD Pipeline
+
+The GitHub Actions workflow (`.github/workflows/deploy.yml`) triggers on push to `main` or `v2`:
 
 ```
-┌─────────────────────────────┐
-│        Browser (React)      │
-│                             │
-│  pdfjs-dist  → Canvas render│
-│  pdf-lib     → Dim inspect  │
-│  Axios       → API calls    │
-└────────────┬────────────────┘
-             │ HTTPS / REST
-             ▼
-┌─────────────────────────────┐
-│     Nginx (EC2 reverse      │
-│     proxy, gzip, 100MB)     │
-└────────────┬────────────────┘
-             │ HTTP localhost:5000
-             ▼
-┌─────────────────────────────┐
-│   Express API (Node 20)     │
-│                             │
-│  /api/pdf/*   → pdf-lib     │
-│  /api/convert/*             │
-│    Word→PDF: PS/soffice     │
-│    PDF→Word: pdf-parse+docx │
-│  /api/secure/* → encrypt    │
-│                             │
-│  Multer → uploads/ (50MB)   │
-│  S3Service → optional S3    │
-└─────────────────────────────┘
+Push to v2/main
+      │
+      ▼
+Checkout code
+      │
+      ▼
+Build Docker image (backend/)
+      │
+      ▼
+Push to Docker Hub (username/page-forge-backend:latest)
+      │
+      ▼
+SSH into EC2
+  - docker pull latest image
+  - docker stop + rm old container
+  - docker run new container with --env-file /home/ubuntu/.env
+  - docker image prune -f
 ```
 
-### File lifecycle
-1. Frontend uploads file via `multipart/form-data`
-2. Multer writes it to `backend/uploads/<timestamp>-<random>-<originalname>`
-3. Service function reads the file, processes it, and returns the result buffer
-4. Controller streams the buffer back to the client
-5. `finally` block deletes all temp files from disk
+### Required GitHub Secrets
+
+| Secret | Description |
+|---|---|
+| `DOCKER_USERNAME` | Docker Hub username |
+| `DOCKER_PASSWORD` | Docker Hub password or access token |
+| `EC2_HOST` | EC2 public IP or domain |
+| `EC2_USERNAME` | SSH user (e.g. `ubuntu`) |
+| `EC2_SSH_KEY` | Private SSH key (PEM format) |
 
 ---
 
-## 🧠 Key Design Decisions
+## Database Schema
 
-### ESM-first backend
-`package.json` sets `"type": "module"`. All imports use ESM `import` syntax. CommonJS packages (like `pdf-parse`) are loaded via `createRequire(import.meta.url)` to guarantee the correct callable default export.
+```prisma
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String?
+  password     String?
+  avatar       String?
+  provider     String        @default("email")
+  googleId     String?       @unique
+  createdAt    DateTime      @default(now())
+  chatSessions ChatSession[]
+  history      HistoryEntry[]
+}
 
-### Native signature canvas
-`react-signature-canvas` was removed because its CommonJS exports are misresolved by Vite's ESM interop in React 19, returning a module namespace object instead of the component class. The replacement uses a plain `<canvas>` element with `onMouseDown`/`onTouchStart` handlers — zero dependencies, React-version agnostic.
+model ChatSession {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title      String?
+  messages   Json     @default("[]")
+  chunks     DocumentChunk[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
 
-### Zoom via CSS `transform: scale`
-Page zoom is applied as `transform: scale(zoom)` on an inner div, while the outer wrapper div is sized to `naturalWidth × zoom` so the scroll container allocates correct layout space. All drag, resize, and click coordinate deltas are divided by `zoom` to convert from screen pixels back to natural PDF coordinates.
+model DocumentChunk {
+  id          String      @id @default(cuid())
+  sessionId   String
+  session     ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  chunkText   String
+  embedding   Unsupported("vector(768)")?
+  createdAt   DateTime    @default(now())
+}
 
-### Word → PDF: `spawn` over `exec`
-`child_process.spawn` is used with an argument array instead of `exec` with a shell string. This avoids `cmd.exe` quoting ambiguities for paths containing spaces (common on Windows user directories). `stderr` is captured separately and forwarded to the error response so failures are diagnosable.
-
-### Dual-platform Word → PDF
-- **Windows (dev):** PowerShell + Word COM automation (`New-Object -ComObject Word.Application`). Runs with `DisplayAlerts = 0`, `Visible = $false` to stay fully headless.
-- **Linux/Docker (prod):** `soffice --headless --convert-to pdf` via LibreOffice (pre-installed in Docker image).
+model HistoryEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filename  String
+  operation String   // merge | split | organize | edit | convert | secure
+  fileUrl   String?  // S3 key or null
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+}
+```
 
 ---
 
-## 🤝 Contributing
+## License
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feat/my-feature`
-3. Commit your changes: `git commit -m 'feat: add my feature'`
-4. Push to the branch: `git push origin feat/my-feature`
-5. Open a Pull Request against `main`
-
-### Code style
-- **Frontend**: ESLint with `eslint-plugin-react` and `eslint-plugin-react-hooks`
-- **Backend**: ESM modules, async/await throughout, `finally` blocks for temp file cleanup
-- Keep service functions pure (input path → output buffer); controllers handle HTTP concerns
+MIT License — feel free to use and adapt for your own projects.
 
 ---
 
-## 📜 License
-
-MIT © 2025 Page Forge Contributors
+*Built by [Ganesh Daware](https://ganeshdev.me)*
