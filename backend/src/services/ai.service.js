@@ -38,7 +38,7 @@ export const generateEmbeddings = async (text) => {
 export const generateSummary = async (text) => {
   const ai = getGenAI();
   const model = ai.getGenerativeModel({
-    model: 'gemini-2.5-flash-lite',
+    model: 'gemini-2.0-flash',
     generationConfig: {
       responseMimeType: 'application/json',
     },
@@ -82,7 +82,7 @@ ${text}
  */
 export const askGeminiStream = async (context, question) => {
   const ai = getGenAI();
-  const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
+  const model = ai.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
   const prompt = `
 You are an expert document assistant. You have been provided with the relevant context from a PDF document to answer the user's question.
