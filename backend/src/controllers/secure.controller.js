@@ -39,8 +39,6 @@ export const handleProtect = async (req, res) => {
     const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
     const outputFilename = `${baseName}_secured.pdf`;
 
-    // Background S3 upload of input PDF file
-    uploadFileToS3(req.file.path, `uploads/secure-protect-${Date.now()}.pdf`);
     // Background S3 upload of output protected PDF file
     const s3Key = `outputs/secured-${Date.now()}-${outputFilename}`;
     uploadBufferToS3(Buffer.from(protectedBytes), s3Key, 'application/pdf');
@@ -91,8 +89,6 @@ export const handleUnlock = async (req, res) => {
     const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
     const outputFilename = `${baseName}_unlocked.pdf`;
 
-    // Background S3 upload of input PDF file
-    uploadFileToS3(req.file.path, `uploads/secure-unlock-${Date.now()}.pdf`);
     // Background S3 upload of output unlocked PDF file
     const s3Key = `outputs/unlocked-${Date.now()}-${outputFilename}`;
     uploadBufferToS3(Buffer.from(unlockedBytes), s3Key, 'application/pdf');

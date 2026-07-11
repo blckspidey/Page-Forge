@@ -40,10 +40,6 @@ export const handleMerge = async (req, res) => {
   try {
     const mergedBytes = await mergePDFs(filePaths);
     
-    // Background S3 upload of input files
-    filePaths.forEach((path, idx) => {
-      uploadFileToS3(path, `uploads/merge-${Date.now()}-${idx}.pdf`);
-    });
     const firstFilename = req.files[0]?.originalname || 'document.pdf';
     const baseName = firstFilename.substring(0, firstFilename.lastIndexOf('.')) || firstFilename;
     const outputFilename = `${baseName}_merged.pdf`;
@@ -94,8 +90,6 @@ export const handleSplit = async (req, res) => {
   try {
     const result = await splitPDF(req.file.path, splitPages);
 
-    // Background S3 upload of input file
-    uploadFileToS3(req.file.path, `uploads/split-${Date.now()}.pdf`);
     const originalName = req.file.originalname;
     const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
     const ext = result.filename.endsWith('.zip') ? '.zip' : '.pdf';
@@ -156,8 +150,6 @@ export const handleOrganize = async (req, res) => {
   try {
     const organizedBytes = await organizePDF(req.file.path, operations);
 
-    // Background S3 upload of input file
-    uploadFileToS3(req.file.path, `uploads/organize-${Date.now()}.pdf`);
     const originalName = req.file.originalname;
     const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
     const outputFilename = `${baseName}_organized.pdf`;
@@ -217,8 +209,6 @@ export const handleEdit = async (req, res) => {
   try {
     const editedBytes = await editPDF(req.file.path, elements);
 
-    // Background S3 upload of input file
-    uploadFileToS3(req.file.path, `uploads/edit-${Date.now()}.pdf`);
     const originalName = req.file.originalname;
     const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
     const outputFilename = `${baseName}_edited.pdf`;

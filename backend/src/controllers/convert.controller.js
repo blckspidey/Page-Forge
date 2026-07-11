@@ -36,8 +36,6 @@ export const handleWordToPdf = async (req, res) => {
   try {
     const pdfBytes = await wordToPdf(req.file.path);
 
-    // Background S3 upload of input Word file
-    uploadFileToS3(req.file.path, `uploads/convert-word-${Date.now()}.docx`);
     const baseName = path.basename(req.file.originalname, '.docx');
     const outputFilename = `${baseName}_converted.pdf`;
 
@@ -87,8 +85,6 @@ export const handlePdfToWord = async (req, res) => {
   try {
     const docxBuffer = await pdfToWord(req.file.path);
 
-    // Background S3 upload of input PDF file
-    uploadFileToS3(req.file.path, `uploads/convert-pdf-${Date.now()}.pdf`);
     const baseName = path.basename(req.file.originalname, '.pdf');
     const outputFilename = `${baseName}_converted.docx`;
 
