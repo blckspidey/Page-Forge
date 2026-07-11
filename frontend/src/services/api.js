@@ -152,7 +152,12 @@ export const editPDF = (file, elements) => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('elements', JSON.stringify(elements));
-  return api.post('/api/pdf/edit', formData, { responseType: 'blob' });
+  return api.post('/api/pdf/edit', formData, {
+    responseType: 'blob',
+    timeout: 5 * 60 * 1000,        // 5 minutes — large PDFs need time
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+  });
 };
 
 export const convertWordToPdf = (file) => {
