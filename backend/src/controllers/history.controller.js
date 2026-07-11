@@ -1,18 +1,33 @@
 import { db } from '../config/db.js';
-import { pdfHistory } from '../schema/index.js';
-import { eq, desc } from 'drizzle-orm';
+import { getPresignedUrl, isS3Configured } from '../services/s3.service.js';
 
 // ─── Get User History ─────────────────────────────────────────────────────────
 export const getHistory = async (req, res) => {
   try {
-    const history = await db
-      .select()
-      .from(pdfHistory)
-      .where(eq(pdfHistory.userId, req.user.id))
-      .orderBy(desc(pdfHistory.createdAt))
-      .limit(100);
+    const history = await db.pdfHistory.findMany({
+      where: { user_id: req.user.id },
+      orderBy: { created_at: 'desc' },
+      take: 100
+    });
 
-    return res.json({ history });
+    const s3Active = isS3Configured();
+
+    const historyWithUrls = await Promise.all(history.map(async (entry) => {
+      let fileUrl = entry.file_url;
+      // If S3 is active and the stored file_url is a relative S3 key (doesn't start with http/https)
+      if (s3Active && fileUrl && !fileUrl.startsWith('http')) {
+        const presigned = await getPresignedUrl(fileUrl);
+        if (presigned) {
+          fileUrl = presigned;
+        }
+      }
+      return {
+        ...entry,
+        file_url: fileUrl
+      };
+    }));
+
+    return res.json({ history: historyWithUrls });
   } catch (err) {
     console.error('[History] getHistory error:', err);
     return res.status(500).json({ error: 'Failed to fetch history.' });
@@ -22,7 +37,15 @@ export const getHistory = async (req, res) => {
 // ─── Add History Entry (internal helper) ────────────────────────────────────
 export const addHistoryEntry = async (userId, { filename, operation, fileUrl, metadata }) => {
   try {
-    await db.insert(pdfHistory).values({ userId, filename, operation, fileUrl, metadata });
+    await db.pdfHistory.create({
+      data: {
+        user_id: userId,
+        filename,
+        operation,
+        file_url: fileUrl,
+        metadata: metadata || {}
+      }
+    });
   } catch (err) {
     // Non-critical — log but don't throw
     console.error('[History] Failed to log entry:', err.message);
@@ -33,9 +56,9 @@ export const addHistoryEntry = async (userId, { filename, operation, fileUrl, me
 export const deleteHistoryEntry = async (req, res) => {
   try {
     const { id } = req.params;
-    await db
-      .delete(pdfHistory)
-      .where(eq(pdfHistory.id, id));
+    await db.pdfHistory.delete({
+      where: { id }
+    });
 
     return res.json({ message: 'Entry deleted.' });
   } catch (err) {
@@ -46,7 +69,9 @@ export const deleteHistoryEntry = async (req, res) => {
 // ─── Clear All History ────────────────────────────────────────────────────────
 export const clearHistory = async (req, res) => {
   try {
-    await db.delete(pdfHistory).where(eq(pdfHistory.userId, req.user.id));
+    await db.pdfHistory.deleteMany({
+      where: { user_id: req.user.id }
+    });
     return res.json({ message: 'History cleared.' });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to clear history.' });

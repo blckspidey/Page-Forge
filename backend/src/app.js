@@ -3,14 +3,22 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 import pdfRoutes     from './routes/pdf.routes.js';
 import convertRoutes from './routes/convert.routes.js';
 import secureRoutes  from './routes/secure.routes.js';
 import authRoutes    from './routes/auth.routes.js';
 import historyRoutes from './routes/history.routes.js';
+import aiRoutes      from './routes/ai.routes.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
+
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ─── Security Headers ─────────────────────────────────────────────────────────
 app.use(helmet({
@@ -21,6 +29,7 @@ app.use(helmet({
 const ALLOWED_ORIGINS = [
   process.env.FRONTEND_URL || 'http://localhost:5173',
   'http://localhost:5173',
+  'http://localhost:5174',
   'http://localhost:3000',
 ];
 
@@ -30,7 +39,7 @@ app.use(cors({
     return cb(new Error(`CORS: origin ${origin} not allowed`), false);
   },
   credentials: true,
-  exposedHeaders: ['Content-Disposition'],
+  exposedHeaders: ['Content-Disposition', 'content-disposition', 'Content-Type', 'content-type'],
 }));
 
 // ─── Middlewares ──────────────────────────────────────────────────────────────
@@ -49,6 +58,7 @@ app.use('/api/history', historyRoutes);
 app.use('/api/pdf',     pdfRoutes);
 app.use('/api/convert', convertRoutes);
 app.use('/api/secure',  secureRoutes);
+app.use('/api/ai',      aiRoutes);
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {

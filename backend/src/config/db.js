@@ -1,12 +1,22 @@
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
-import * as schema from '../schema/index.js';
+// DATABASE_URL is injected by Node --env-file=.env before this module loads
+import { neonConfig } from '@neondatabase/serverless';
+import { PrismaNeon } from '@prisma/adapter-neon';
+import { PrismaClient } from '@prisma/client';
+import ws from 'ws';
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL environment variable is not set.');
+// Required for Neon WebSocket connection in Node.js when using Pool
+neonConfig.webSocketConstructor = ws;
+
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error('DATABASE_URL is not set. Check your backend/.env file.');
 }
 
-const sql = neon(process.env.DATABASE_URL);
-export const db = drizzle(sql, { schema });
+// Instantiate the Prisma Neon adapter with the connection options
+const adapter = new PrismaNeon({ connectionString });
+
+// Instantiate PrismaClient with the adapter
+export const db = new PrismaClient({ adapter });
 
 export default db;

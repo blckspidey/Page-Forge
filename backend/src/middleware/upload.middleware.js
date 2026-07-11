@@ -39,7 +39,8 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB limit
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+    fieldSize: 50 * 1024 * 1024 // 50MB field limit (for large base64 strings in forms)
   }
 });
 

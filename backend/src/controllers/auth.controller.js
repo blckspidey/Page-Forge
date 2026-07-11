@@ -1,7 +1,5 @@
 import bcrypt from 'bcryptjs';
 import { db } from '../config/db.js';
-import { users } from '../schema/index.js';
-import { eq } from 'drizzle-orm';
 import {
   generateTokens,
   verifyRefreshToken,
@@ -21,17 +19,17 @@ export const register = async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     }
 
-    const [existing] = await db.select().from(users).where(eq(users.email, email));
+    const existing = await db.user.findUnique({ where: { email } });
     if (existing) {
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const [user] = await db
-      .insert(users)
-      .values({ email, password: hashedPassword, name })
-      .returning({ id: users.id, email: users.email, name: users.name, createdAt: users.createdAt });
+    const user = await db.user.create({
+      data: { email, password: hashedPassword, name },
+      select: { id: true, email: true, name: true, created_at: true }
+    });
 
     const tokens = generateTokens(user);
     setAuthCookies(res, tokens);
@@ -55,9 +53,9 @@ export const login = async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-    const [user] = await db.select().from(users).where(eq(users.email, email));
+    const user = await db.user.findUnique({ where: { email } });
 
-    if (!user) {
+    if (!user || !user.password) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
@@ -95,10 +93,10 @@ export const refresh = async (req, res) => {
 
     const decoded = verifyRefreshToken(token);
 
-    const [user] = await db
-      .select({ id: users.id, email: users.email, name: users.name, avatar: users.avatar })
-      .from(users)
-      .where(eq(users.id, decoded.id));
+    const user = await db.user.findUnique({
+      where: { id: decoded.id },
+      select: { id: true, email: true, name: true, avatar: true }
+    });
 
     if (!user) return res.status(401).json({ error: 'User not found.' });
 
@@ -115,10 +113,10 @@ export const refresh = async (req, res) => {
 // ─── Get Current User ─────────────────────────────────────────────────────────
 export const getMe = async (req, res) => {
   try {
-    const [user] = await db
-      .select({ id: users.id, email: users.email, name: users.name, avatar: users.avatar, createdAt: users.createdAt })
-      .from(users)
-      .where(eq(users.id, req.user.id));
+    const user = await db.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, email: true, name: true, avatar: true, created_at: true }
+    });
 
     if (!user) return res.status(404).json({ error: 'User not found.' });
 
