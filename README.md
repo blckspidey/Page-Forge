@@ -212,6 +212,11 @@ Create a `.env` file inside `backend/` (see `.env.example`):
 PORT=5000
 NODE_ENV=development
 
+# Gemini AI
+GEMINI_API_KEY=your_gemini_api_key_from_ai_studio
+GEMINI_TEXT_MODEL=gemini-3.1-flash-lite
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+
 # AWS S3 (optional — omit to use local disk storage)
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your_access_key

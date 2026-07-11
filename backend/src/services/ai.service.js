@@ -2,6 +2,33 @@ import { GoogleGenAI } from '@google/genai';
 
 // Initialize Gemini Client lazily so it doesn't fail on boot if GEMINI_API_KEY is not set
 let genAI = null;
+const DEFAULT_GEMINI_TEXT_MODEL = 'gemini-3.1-flash-lite';
+const RETIRED_OR_BLOCKED_TEXT_MODELS = new Set([
+  'gemini-2.0-flash',
+  'gemini-2.5-flash',
+  'models/gemini-2.0-flash',
+  'models/gemini-2.5-flash',
+]);
+
+const resolveGeminiTextModel = () => {
+  const configuredModel = process.env.GEMINI_TEXT_MODEL?.trim();
+  if (!configuredModel) return DEFAULT_GEMINI_TEXT_MODEL;
+
+  if (RETIRED_OR_BLOCKED_TEXT_MODELS.has(configuredModel)) {
+    console.warn(
+      `[Gemini] Ignoring unavailable/free-tier-blocked text model "${configuredModel}". ` +
+      `Using "${DEFAULT_GEMINI_TEXT_MODEL}" instead.`
+    );
+    return DEFAULT_GEMINI_TEXT_MODEL;
+  }
+
+  return configuredModel;
+};
+
+const GEMINI_TEXT_MODEL = resolveGeminiTextModel();
+const GEMINI_EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-001';
+console.log(`[Gemini] Text model: ${GEMINI_TEXT_MODEL}`);
+console.log(`[Gemini] Embedding model: ${GEMINI_EMBEDDING_MODEL}`);
 
 const getGenAI = () => {
   if (!genAI) {
@@ -14,13 +41,29 @@ const getGenAI = () => {
   return genAI;
 };
 
+const extractGeminiMessage = (error) => {
+  const rawMessage = error?.message || String(error);
+
+  try {
+    const parsed = JSON.parse(rawMessage);
+    return parsed?.error?.message || parsed?.message || rawMessage;
+  } catch (_) {
+    return rawMessage;
+  }
+};
+
+const toGeminiError = (error) => {
+  const providerMessage = extractGeminiMessage(error);
+  return new Error(`Gemini API request failed: ${providerMessage}`);
+};
+
 /**
  * Generates a 768-dimension vector embedding for the input text using gemini-embedding-001.
  */
 export const generateEmbeddings = async (text) => {
   const ai = getGenAI();
   const result = await ai.models.embedContent({
-    model: 'gemini-embedding-001',
+    model: GEMINI_EMBEDDING_MODEL,
     contents: text,
     config: {
       outputDimensionality: 768,
@@ -66,13 +109,18 @@ Document Text:
 ${text}
   `;
 
-  const result = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
-    contents: prompt,
-    config: {
-      responseMimeType: 'application/json',
-    },
-  });
+  let result;
+  try {
+    result = await ai.models.generateContent({
+      model: GEMINI_TEXT_MODEL,
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+      },
+    });
+  } catch (error) {
+    throw toGeminiError(error);
+  }
 
   const responseText = result.text;
   return JSON.parse(responseText);
@@ -102,10 +150,15 @@ Instructions:
 4. Keep the output beautifully formatted with markdown (lists, bolding, sections) where appropriate.
 `;
 
-  const responseStream = await ai.models.generateContentStream({
-    model: 'gemini-2.0-flash',
-    contents: prompt,
-  });
+  let responseStream;
+  try {
+    responseStream = await ai.models.generateContentStream({
+      model: GEMINI_TEXT_MODEL,
+      contents: prompt,
+    });
+  } catch (error) {
+    throw toGeminiError(error);
+  }
 
   return responseStream;
 };
