@@ -9,6 +9,7 @@ import { splitPDF } from '../services/split.service.js';
 import { organizePDF } from '../services/organize.service.js';
 import { editPDF } from '../services/edit.service.js';
 import { uploadFileToS3, uploadBufferToS3 } from '../services/s3.service.js';
+import { addHistoryEntry } from './history.controller.js';
 
 /**
  * Safely unlinks a temporary file from the disk.
@@ -43,12 +44,28 @@ export const handleMerge = async (req, res) => {
     filePaths.forEach((path, idx) => {
       uploadFileToS3(path, `uploads/merge-${Date.now()}-${idx}.pdf`);
     });
+    const firstFilename = req.files[0]?.originalname || 'document.pdf';
+    const baseName = firstFilename.substring(0, firstFilename.lastIndexOf('.')) || firstFilename;
+    const outputFilename = `${baseName}_merged.pdf`;
+
     // Background S3 upload of output file
-    uploadBufferToS3(Buffer.from(mergedBytes), `outputs/merged-${Date.now()}.pdf`, 'application/pdf');
+    const s3Key = `outputs/merged-${Date.now()}-${outputFilename}`;
+    uploadBufferToS3(Buffer.from(mergedBytes), s3Key, 'application/pdf');
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="merged.pdf"');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
     res.send(Buffer.from(mergedBytes));
+
+    // Log history if logged in
+    if (req.user) {
+      const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
+      addHistoryEntry(req.user.id, {
+        filename: outputFilename,
+        operation: 'merge',
+        fileUrl: isS3 ? s3Key : null,
+        metadata: { filesCount: filePaths.length }
+      });
+    }
   } catch (err) {
     console.error('Merge handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to merge PDFs' });
@@ -79,12 +96,29 @@ export const handleSplit = async (req, res) => {
 
     // Background S3 upload of input file
     uploadFileToS3(req.file.path, `uploads/split-${Date.now()}.pdf`);
+    const originalName = req.file.originalname;
+    const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
+    const ext = result.filename.endsWith('.zip') ? '.zip' : '.pdf';
+    const outputFilename = `${baseName}_split${ext}`;
+
     // Background S3 upload of output file
-    uploadBufferToS3(Buffer.from(result.data), `outputs/split-${Date.now()}-${result.filename}`, result.mimeType);
+    const s3Key = `outputs/split-${Date.now()}-${outputFilename}`;
+    uploadBufferToS3(Buffer.from(result.data), s3Key, result.mimeType);
 
     res.setHeader('Content-Type', result.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
     res.send(Buffer.from(result.data));
+
+    // Log history if logged in
+    if (req.user) {
+      const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
+      addHistoryEntry(req.user.id, {
+        filename: outputFilename,
+        operation: 'split',
+        fileUrl: isS3 ? s3Key : null,
+        metadata: { splitPages }
+      });
+    }
   } catch (err) {
     console.error('Split handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to split PDF' });
@@ -124,12 +158,28 @@ export const handleOrganize = async (req, res) => {
 
     // Background S3 upload of input file
     uploadFileToS3(req.file.path, `uploads/organize-${Date.now()}.pdf`);
+    const originalName = req.file.originalname;
+    const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
+    const outputFilename = `${baseName}_organized.pdf`;
+
     // Background S3 upload of output file
-    uploadBufferToS3(Buffer.from(organizedBytes), `outputs/organized-${Date.now()}.pdf`, 'application/pdf');
+    const s3Key = `outputs/organized-${Date.now()}-${outputFilename}`;
+    uploadBufferToS3(Buffer.from(organizedBytes), s3Key, 'application/pdf');
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="organized.pdf"');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
     res.send(Buffer.from(organizedBytes));
+
+    // Log history if logged in
+    if (req.user) {
+      const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
+      addHistoryEntry(req.user.id, {
+        filename: outputFilename,
+        operation: 'organize',
+        fileUrl: isS3 ? s3Key : null,
+        metadata: { operationsCount: operations.length }
+      });
+    }
   } catch (err) {
     console.error('Organize handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to organize PDF' });
@@ -169,12 +219,28 @@ export const handleEdit = async (req, res) => {
 
     // Background S3 upload of input file
     uploadFileToS3(req.file.path, `uploads/edit-${Date.now()}.pdf`);
+    const originalName = req.file.originalname;
+    const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
+    const outputFilename = `${baseName}_edited.pdf`;
+
     // Background S3 upload of output file
-    uploadBufferToS3(Buffer.from(editedBytes), `outputs/edited-${Date.now()}.pdf`, 'application/pdf');
+    const s3Key = `outputs/edited-${Date.now()}-${outputFilename}`;
+    uploadBufferToS3(Buffer.from(editedBytes), s3Key, 'application/pdf');
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="edited.pdf"');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
     res.send(Buffer.from(editedBytes));
+
+    // Log history if logged in
+    if (req.user) {
+      const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
+      addHistoryEntry(req.user.id, {
+        filename: outputFilename,
+        operation: 'edit',
+        fileUrl: isS3 ? s3Key : null,
+        metadata: { elementsCount: elements.length }
+      });
+    }
   } catch (err) {
     console.error('Edit handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to edit PDF' });

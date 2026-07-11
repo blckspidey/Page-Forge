@@ -735,16 +735,29 @@ export default function EditPDF() {
             accept="application/pdf"
             className="hidden"
           />
-          <div 
+          <div
             onClick={() => fileInputRef.current.click()}
-            className="border-2 border-dashed border-white/10 hover:border-violet-500/40 rounded-2xl p-12 text-center cursor-pointer transition-all bg-slate-900/10 hover:bg-slate-900/30 group"
+            onDragOver={(e) => { e.preventDefault(); e.currentTarget.setAttribute('data-dragging', 'true'); }}
+            onDragLeave={(e) => { e.currentTarget.removeAttribute('data-dragging'); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.currentTarget.removeAttribute('data-dragging');
+              const dropped = e.dataTransfer.files?.[0];
+              if (!dropped) return;
+              if (dropped.type !== 'application/pdf' && !dropped.name.toLowerCase().endsWith('.pdf')) {
+                setError('Please drop a valid PDF file.');
+                return;
+              }
+              setFile(dropped);
+            }}
+            className="border-2 border-dashed border-white/10 hover:border-violet-500/40 data-[dragging]:border-violet-500/70 data-[dragging]:bg-violet-500/10 rounded-2xl p-12 text-center cursor-pointer transition-all bg-slate-900/10 hover:bg-slate-900/30 group"
           >
             <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4 border border-white/5 group-hover:scale-105 transition-transform duration-300">
               <Upload className="w-6 h-6 text-dark-300 group-hover:text-white" />
             </div>
             <h3 className="text-white font-semibold mb-1">Upload PDF Document</h3>
             <p className="text-dark-300 text-xs max-w-xs mx-auto">
-              Choose or drag-and-drop a PDF to open the interactive overlay builder.
+              Click to choose or <span className="text-violet-400">drag &amp; drop</span> a PDF to open the interactive overlay builder.
             </p>
           </div>
         </div>

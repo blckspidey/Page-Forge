@@ -4,7 +4,7 @@ const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:5000').repla
 
 const api = axios.create({
   baseURL: API_BASE,
-  withCredentials: false,
+  withCredentials: true,   // Required: sends HTTP-only auth cookies cross-origin
 });
 
 // Response interceptor to handle Blob errors (status 400/500 returns error as JSON inside a Blob)
@@ -31,20 +31,34 @@ export const downloadBlob = (response, defaultFilename) => {
     if (typeof headers.get === 'function') {
       return headers.get(name) || '';
     }
-    return headers[name.toLowerCase()] || headers[name] || '';
+    const lowerName = name.toLowerCase();
+    for (const key in headers) {
+      if (key.toLowerCase() === lowerName) {
+        return headers[key] || '';
+      }
+    }
+    return '';
   };
 
   const contentType = getHeader(response.headers, 'Content-Type');
   const contentDisposition = getHeader(response.headers, 'Content-Disposition');
 
-  if (contentType.toLowerCase().includes('application/json')) {
+  console.log('[downloadBlob] Response headers:', response.headers);
+  console.log('[downloadBlob] Content-Disposition:', contentDisposition);
+
+  if (contentType && contentType.toLowerCase().includes('application/json')) {
     console.error('downloadBlob received JSON response instead of document blob.');
     return;
   }
 
-  const blob = new Blob([response.data], { type: contentType || 'application/octet-stream' });
-  let filename = defaultFilename || 'document';
+  // Ensure we have a Blob. Axios responseType: 'blob' returns response.data as Blob.
+  const blob = response.data instanceof Blob 
+    ? response.data 
+    : new Blob([response.data], { type: contentType || 'application/octet-stream' });
 
+  let filename = '';
+
+  // Try to extract from Content-Disposition first
   if (contentDisposition) {
     const match = contentDisposition.match(/filename\*?=["']?(?:UTF-8'')?([^;"']+)["']?/i);
     if (match && match[1]) {
@@ -56,42 +70,60 @@ export const downloadBlob = (response, defaultFilename) => {
     }
   }
 
-  if (!filename || typeof filename !== 'string') {
+  // Fallback to defaultFilename
+  if (!filename || typeof filename !== 'string' || filename.trim() === '') {
     filename = defaultFilename || 'document';
   }
 
+  // Clean filename of any potential path prefix/suffix or quotes
+  filename = filename.replace(/["']/g, '').trim();
+
+  // Enforce proper extension if missing
   const filenameLower = filename.toLowerCase();
-  const contentTypeLower = contentType.toLowerCase();
-  if (contentTypeLower.includes('pdf') && !filenameLower.endsWith('.pdf')) {
-    filename += '.pdf';
-  } else if ((contentTypeLower.includes('word') || contentTypeLower.includes('officedocument') || contentTypeLower.includes('docx')) && !filenameLower.endsWith('.docx')) {
-    filename += '.docx';
-  } else if (contentTypeLower.includes('zip') && !filenameLower.endsWith('.zip')) {
-    filename += '.zip';
+  const contentTypeLower = contentType ? contentType.toLowerCase() : '';
+  
+  if (contentTypeLower.includes('pdf')) {
+    if (!filenameLower.endsWith('.pdf')) {
+      filename += '.pdf';
+    }
+  } else if (contentTypeLower.includes('word') || contentTypeLower.includes('officedocument') || contentTypeLower.includes('docx')) {
+    if (!filenameLower.endsWith('.docx')) {
+      filename += '.docx';
+    }
+  } else if (contentTypeLower.includes('zip')) {
+    if (!filenameLower.endsWith('.zip')) {
+      filename += '.zip';
+    }
+  } else {
+    // If we still don't have an extension, try to infer it from defaultFilename or content-type
+    if (!filename.includes('.')) {
+      if (defaultFilename && defaultFilename.includes('.')) {
+        const ext = defaultFilename.split('.').pop();
+        filename += '.' + ext;
+      } else {
+        filename += '.pdf'; // default fallback
+      }
+    }
   }
+
+  console.log('[downloadBlob] Triggering download for final filename:', filename);
 
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
+  link.style.display = 'none';
   link.href = url;
   link.download = filename;
-  link.rel = 'noopener';
-  link.setAttribute('download', filename);
+  link.setAttribute('download', filename); // Set both property and attribute
   
   document.body.appendChild(link);
+  link.click();
   
-  // Dispatch native MouseEvent click
-  const clickEvent = new MouseEvent('click', {
-    view: window,
-    bubbles: true,
-    cancelable: true
-  });
-  link.dispatchEvent(clickEvent);
-
-  // Remove the temporary link from DOM after 1 second, but keep the blob URL in memory to prevent Chrome metadata loss
+  // Clean up after 1s to allow browser to handle the download before URL revocation
   setTimeout(() => {
     if (document.body.contains(link)) {
       document.body.removeChild(link);
     }
+    window.URL.revokeObjectURL(url);
   }, 1000);
 };
 
@@ -148,5 +180,22 @@ export const unlockPDF = (file, password) => {
   formData.append('password', password);
   return api.post('/api/secure/unlock', formData, { responseType: 'blob' });
 };
+
+// ─── AI Endpoints ─────────────────────────────────────────────────────────────
+export const summarizePDF = (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post('/api/ai/summarize', formData);
+};
+
+export const uploadPDFForChat = (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post('/api/ai/chat/upload', formData);
+};
+
+export const getChatSessions = () => api.get('/api/ai/chat/sessions');
+export const getChatSession = (id) => api.get(`/api/ai/chat/sessions/${id}`);
+export const deleteChatSession = (id) => api.delete(`/api/ai/chat/sessions/${id}`);
 
 export default api;

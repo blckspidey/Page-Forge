@@ -47,3 +47,5 @@ app.listen(PORT, () => {
   setInterval(cleanupOldFiles, 30 * 60 * 1000);
 });
 
+// Trigger reload with real Gemini API key configured.
+
