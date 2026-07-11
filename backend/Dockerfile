@@ -22,6 +22,9 @@ RUN npm ci --only=production
 # Copy application source code
 COPY . .
 
+# Generate Prisma client for Neon PostgreSQL database query bindings
+RUN npx prisma generate
+
 # Ensure upload directory exists and is writable
 RUN mkdir -p uploads && chmod 777 uploads
 
