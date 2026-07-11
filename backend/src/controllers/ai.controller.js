@@ -258,7 +258,7 @@ export const chatWithPdf = async (req, res) => {
     let fullAnswer = '';
 
     for await (const chunk of stream) {
-      const text = chunk.text();
+      const text = chunk.text;
       fullAnswer += text;
       res.write(`data: ${JSON.stringify({ text })}\n\n`);
     }
