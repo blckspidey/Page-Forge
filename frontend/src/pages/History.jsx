@@ -155,7 +155,7 @@ export default function History() {
                   <div className="flex items-center space-x-2 mt-0.5">
                     <span className={`text-xs font-medium ${meta.color}`}>{meta.label}</span>
                     <span className="text-slate-600">·</span>
-                    <span className="text-xs text-slate-500">{timeAgo(entry.createdAt)}</span>
+                    <span className="text-xs text-slate-500">{timeAgo(entry.created_at || entry.createdAt)}</span>
                     {entry.metadata?.pages && (
                       <>
                         <span className="text-slate-600">·</span>
@@ -167,9 +167,9 @@ export default function History() {
 
                 {/* Actions */}
                 <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {entry.fileUrl && (
+                  {(entry.file_url || entry.fileUrl) && (
                     <a
-                      href={entry.fileUrl}
+                      href={entry.file_url || entry.fileUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all"

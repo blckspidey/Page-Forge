@@ -11,7 +11,6 @@ const SplitPDF    = lazy(() => import('./pages/SplitPDF'));
 const OrganizePDF = lazy(() => import('./pages/OrganizePDF'));
 const EditPDF     = lazy(() => import('./pages/EditPDF'));
 const ConvertPDF  = lazy(() => import('./pages/ConvertPDF'));
-const SecurePDF   = lazy(() => import('./pages/SecurePDF'));
 const NotFound    = lazy(() => import('./pages/NotFound'));
 
 // ─── Auth Pages ───────────────────────────────────────────────────────────────
@@ -22,6 +21,7 @@ const Register = lazy(() => import('./pages/Register'));
 const History      = lazy(() => import('./pages/History'));
 const ChatPDF      = lazy(() => import('./pages/ChatPDF'));
 const Summarize    = lazy(() => import('./pages/Summarize'));
+const SecurePDF   = lazy(() => import('./pages/SecurePDF'));
 
 /** Full-screen loading skeleton shown during lazy chunk download */
 function PageLoader() {
@@ -55,7 +55,7 @@ function App() {
                 <Route path="/organize" element={<OrganizePDF />} />
                 <Route path="/edit"     element={<EditPDF />} />
                 <Route path="/convert"  element={<ConvertPDF />} />
-                <Route path="/secure"   element={<SecurePDF />} />
+
 
                 {/* ── Auth ── */}
                 <Route path="/login"    element={<Login />} />
@@ -65,6 +65,7 @@ function App() {
                 <Route path="/history"   element={<ProtectedRoute><History /></ProtectedRoute>} />
                 <Route path="/chat-pdf"  element={<ProtectedRoute><ChatPDF /></ProtectedRoute>} />
                 <Route path="/summarize" element={<ProtectedRoute><Summarize /></ProtectedRoute>} />
+                <Route path="/secure"    element={<ProtectedRoute><SecurePDF /></ProtectedRoute>} />
 
                 <Route path="*" element={<NotFound />} />
               </Routes>
