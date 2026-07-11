@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
 // Initialize Gemini Client lazily so it doesn't fail on boot if GEMINI_API_KEY is not set
 let genAI = null;
@@ -9,27 +9,27 @@ const getGenAI = () => {
     if (!apiKey || apiKey.startsWith('your_gemini_api_key')) {
       throw new Error('GEMINI_API_KEY environment variable is not set. Please obtain an API key from Google AI Studio and place it in your .env file.');
     }
-    genAI = new GoogleGenerativeAI(apiKey);
+    genAI = new GoogleGenAI({ apiKey });
   }
   return genAI;
 };
 
 /**
- * Generates a 768-dimension vector embedding for the input text using text-embedding-004.
+ * Generates a 768-dimension vector embedding for the input text using gemini-embedding-001.
  */
 export const generateEmbeddings = async (text) => {
   const ai = getGenAI();
-  const model = ai.getGenerativeModel({ model: 'gemini-embedding-001' });
-  const result = await model.embedContent({
-    content: {
-      parts: [{ text }]
+  const result = await ai.models.embedContent({
+    model: 'gemini-embedding-001',
+    contents: text,
+    config: {
+      outputDimensionality: 768,
     },
-    outputDimensionality: 768
   });
-  if (!result || !result.embedding || !result.embedding.values) {
+  if (!result || !result.embeddings || !result.embeddings[0]?.values) {
     throw new Error('Failed to generate embedding from Gemini API.');
   }
-  return result.embedding.values;
+  return result.embeddings[0].values;
 };
 
 /**
@@ -37,12 +37,6 @@ export const generateEmbeddings = async (text) => {
  */
 export const generateSummary = async (text) => {
   const ai = getGenAI();
-  const model = ai.getGenerativeModel({
-    model: 'gemini-2.0-flash',
-    generationConfig: {
-      responseMimeType: 'application/json',
-    },
-  });
 
   const prompt = `
 Analyze the following document text and return a structured JSON object.
@@ -72,8 +66,15 @@ Document Text:
 ${text}
   `;
 
-  const result = await model.generateContent(prompt);
-  const responseText = result.response.text();
+  const result = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+    },
+  });
+
+  const responseText = result.text;
   return JSON.parse(responseText);
 };
 
@@ -82,7 +83,6 @@ ${text}
  */
 export const askGeminiStream = async (context, question) => {
   const ai = getGenAI();
-  const model = ai.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
   const prompt = `
 You are an expert document assistant. You have been provided with the relevant context from a PDF document to answer the user's question.
@@ -102,6 +102,10 @@ Instructions:
 4. Keep the output beautifully formatted with markdown (lists, bolding, sections) where appropriate.
 `;
 
-  const result = await model.generateContentStream(prompt);
-  return result.stream;
+  const responseStream = await ai.models.generateContentStream({
+    model: 'gemini-2.5-flash',
+    contents: prompt,
+  });
+
+  return responseStream;
 };
