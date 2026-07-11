@@ -115,6 +115,9 @@ To store uploads and processed files securely:
    ```env
    PORT=5000
    NODE_ENV=production
+   GEMINI_API_KEY=your_gemini_api_key_from_ai_studio
+   GEMINI_TEXT_MODEL=gemini-3.1-flash-lite
+   GEMINI_EMBEDDING_MODEL=gemini-embedding-001
    AWS_ACCESS_KEY_ID=your_iam_access_key_id
    AWS_SECRET_ACCESS_KEY=your_iam_secret_access_key
    AWS_REGION=your_aws_region_e.g._us-east-1
