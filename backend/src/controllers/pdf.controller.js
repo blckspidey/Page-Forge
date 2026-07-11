@@ -48,20 +48,20 @@ export const handleMerge = async (req, res) => {
     const s3Key = `outputs/merged-${Date.now()}-${outputFilename}`;
     uploadBufferToS3(Buffer.from(mergedBytes), s3Key, 'application/pdf');
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
-    res.send(Buffer.from(mergedBytes));
-
     // Log history if logged in
     if (req.user) {
       const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
-      addHistoryEntry(req.user.id, {
+      await addHistoryEntry(req.user.id, {
         filename: outputFilename,
         operation: 'merge',
         fileUrl: isS3 ? s3Key : null,
         metadata: { filesCount: filePaths.length }
       });
     }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.send(Buffer.from(mergedBytes));
   } catch (err) {
     console.error('Merge handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to merge PDFs' });
@@ -99,20 +99,20 @@ export const handleSplit = async (req, res) => {
     const s3Key = `outputs/split-${Date.now()}-${outputFilename}`;
     uploadBufferToS3(Buffer.from(result.data), s3Key, result.mimeType);
 
-    res.setHeader('Content-Type', result.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
-    res.send(Buffer.from(result.data));
-
     // Log history if logged in
     if (req.user) {
       const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
-      addHistoryEntry(req.user.id, {
+      await addHistoryEntry(req.user.id, {
         filename: outputFilename,
         operation: 'split',
         fileUrl: isS3 ? s3Key : null,
         metadata: { splitPages }
       });
     }
+
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.send(Buffer.from(result.data));
   } catch (err) {
     console.error('Split handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to split PDF' });
@@ -158,20 +158,20 @@ export const handleOrganize = async (req, res) => {
     const s3Key = `outputs/organized-${Date.now()}-${outputFilename}`;
     uploadBufferToS3(Buffer.from(organizedBytes), s3Key, 'application/pdf');
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
-    res.send(Buffer.from(organizedBytes));
-
     // Log history if logged in
     if (req.user) {
       const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
-      addHistoryEntry(req.user.id, {
+      await addHistoryEntry(req.user.id, {
         filename: outputFilename,
         operation: 'organize',
         fileUrl: isS3 ? s3Key : null,
         metadata: { operationsCount: operations.length }
       });
     }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.send(Buffer.from(organizedBytes));
   } catch (err) {
     console.error('Organize handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to organize PDF' });
@@ -217,20 +217,20 @@ export const handleEdit = async (req, res) => {
     const s3Key = `outputs/edited-${Date.now()}-${outputFilename}`;
     uploadBufferToS3(Buffer.from(editedBytes), s3Key, 'application/pdf');
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
-    res.send(Buffer.from(editedBytes));
-
     // Log history if logged in
     if (req.user) {
       const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
-      addHistoryEntry(req.user.id, {
+      await addHistoryEntry(req.user.id, {
         filename: outputFilename,
         operation: 'edit',
         fileUrl: isS3 ? s3Key : null,
         metadata: { elementsCount: elements.length }
       });
     }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.send(Buffer.from(editedBytes));
   } catch (err) {
     console.error('Edit handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to edit PDF' });
