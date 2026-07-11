@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, FileText, Trash2, Layers, Scissors, Grid, Edit3, Repeat, ShieldAlert, MessageSquare, Sparkles, ChevronRight } from 'lucide-react';
+import { Clock, FileText, Trash2, Layers, Scissors, Grid, Edit3, Repeat, ShieldAlert, MessageSquare, Sparkles, Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 
@@ -165,17 +165,17 @@ export default function History() {
                   </div>
                 </div>
 
-                {/* Actions */}
                 <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   {(entry.file_url || entry.fileUrl) && (
                     <a
                       href={entry.file_url || entry.fileUrl}
+                      download={entry.filename}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-all"
                       title="Download"
                     >
-                      <ChevronRight className="w-4 h-4" />
+                      <Download className="w-4 h-4" />
                     </a>
                   )}
                   <button

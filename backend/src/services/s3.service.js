@@ -111,9 +111,11 @@ export const deleteFileFromS3 = async (s3Key) => {
 export const getPresignedUrl = async (s3Key, expiresInSeconds = 86400) => {
   if (!s3Client) return null;
   try {
+    const filename = s3Key.split('/').pop() || 'document.pdf';
     const command = new GetObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
       Key: s3Key,
+      ResponseContentDisposition: `attachment; filename="${filename}"`
     });
     const url = await getSignedUrl(s3Client, command, { expiresIn: expiresInSeconds });
     return url;
