@@ -39,26 +39,24 @@ export const handleProtect = async (req, res) => {
     const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
     const outputFilename = `${baseName}_secured.pdf`;
 
-    // Background S3 upload of input PDF file
-    uploadFileToS3(req.file.path, `uploads/secure-protect-${Date.now()}.pdf`);
     // Background S3 upload of output protected PDF file
     const s3Key = `outputs/secured-${Date.now()}-${outputFilename}`;
     uploadBufferToS3(Buffer.from(protectedBytes), s3Key, 'application/pdf');
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
-    res.send(Buffer.from(protectedBytes));
-
     // Log history if logged in
     if (req.user) {
       const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
-      addHistoryEntry(req.user.id, {
+      await addHistoryEntry(req.user.id, {
         filename: outputFilename,
         operation: 'secure',
         fileUrl: isS3 ? s3Key : null,
         metadata: { action: 'protect' }
       });
     }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.send(Buffer.from(protectedBytes));
   } catch (err) {
     console.error('Protect handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to secure PDF.' });
@@ -91,26 +89,24 @@ export const handleUnlock = async (req, res) => {
     const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
     const outputFilename = `${baseName}_unlocked.pdf`;
 
-    // Background S3 upload of input PDF file
-    uploadFileToS3(req.file.path, `uploads/secure-unlock-${Date.now()}.pdf`);
     // Background S3 upload of output unlocked PDF file
     const s3Key = `outputs/unlocked-${Date.now()}-${outputFilename}`;
     uploadBufferToS3(Buffer.from(unlockedBytes), s3Key, 'application/pdf');
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
-    res.send(Buffer.from(unlockedBytes));
-
     // Log history if logged in
     if (req.user) {
       const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
-      addHistoryEntry(req.user.id, {
+      await addHistoryEntry(req.user.id, {
         filename: outputFilename,
         operation: 'secure',
         fileUrl: isS3 ? s3Key : null,
         metadata: { action: 'unlock' }
       });
     }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.send(Buffer.from(unlockedBytes));
   } catch (err) {
     console.error('Unlock handler error:', err);
     res.status(400).json({ error: err.message || 'Incorrect password or failed to decrypt PDF.' });

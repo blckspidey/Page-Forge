@@ -36,8 +36,6 @@ export const handleWordToPdf = async (req, res) => {
   try {
     const pdfBytes = await wordToPdf(req.file.path);
 
-    // Background S3 upload of input Word file
-    uploadFileToS3(req.file.path, `uploads/convert-word-${Date.now()}.docx`);
     const baseName = path.basename(req.file.originalname, '.docx');
     const outputFilename = `${baseName}_converted.pdf`;
 
@@ -45,20 +43,20 @@ export const handleWordToPdf = async (req, res) => {
     const s3Key = `outputs/converted-${Date.now()}-${outputFilename}`;
     uploadBufferToS3(Buffer.from(pdfBytes), s3Key, 'application/pdf');
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
-    res.send(Buffer.from(pdfBytes));
-
     // Log history if logged in
     if (req.user) {
       const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
-      addHistoryEntry(req.user.id, {
+      await addHistoryEntry(req.user.id, {
         filename: outputFilename,
         operation: 'convert',
         fileUrl: isS3 ? s3Key : null,
         metadata: { from: 'docx', to: 'pdf' }
       });
     }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.send(Buffer.from(pdfBytes));
   } catch (err) {
     console.error('Word to PDF handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to convert Word to PDF.' });
@@ -87,8 +85,6 @@ export const handlePdfToWord = async (req, res) => {
   try {
     const docxBuffer = await pdfToWord(req.file.path);
 
-    // Background S3 upload of input PDF file
-    uploadFileToS3(req.file.path, `uploads/convert-pdf-${Date.now()}.pdf`);
     const baseName = path.basename(req.file.originalname, '.pdf');
     const outputFilename = `${baseName}_converted.docx`;
 
@@ -96,20 +92,20 @@ export const handlePdfToWord = async (req, res) => {
     const s3Key = `outputs/converted-${Date.now()}-${outputFilename}`;
     uploadBufferToS3(Buffer.from(docxBuffer), s3Key, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
-    res.send(Buffer.from(docxBuffer));
-
     // Log history if logged in
     if (req.user) {
       const isS3 = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.S3_BUCKET_NAME;
-      addHistoryEntry(req.user.id, {
+      await addHistoryEntry(req.user.id, {
         filename: outputFilename,
         operation: 'convert',
         fileUrl: isS3 ? s3Key : null,
         metadata: { from: 'pdf', to: 'docx' }
       });
     }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.send(Buffer.from(docxBuffer));
   } catch (err) {
     console.error('PDF to Word handler error:', err);
     res.status(500).json({ error: err.message || 'Failed to convert PDF to Word.' });
