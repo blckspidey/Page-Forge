@@ -12,6 +12,7 @@ import secureRoutes  from './routes/secure.routes.js';
 import authRoutes    from './routes/auth.routes.js';
 import historyRoutes from './routes/history.routes.js';
 import aiRoutes      from './routes/ai.routes.js';
+import { createApiRateLimiter } from './middleware/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,13 +53,21 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Page Forge API is healthy.', version: 'v2' });
 });
 
+// ─── Rate Limiters ────────────────────────────────────────────────────────────
+const globalLimiter = createApiRateLimiter(15 * 60 * 1000, 300); // 300 requests / 15 min
+const aiLimiter = createApiRateLimiter(15 * 60 * 1000, 30);      // 30 requests / 15 min (cost control)
+const authLimiter = createApiRateLimiter(15 * 60 * 1000, 15);    // 15 requests / 15 min (brute force protection)
+
+// Apply global rate limiter to all API endpoints
+app.use('/api', globalLimiter);
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
-app.use('/api/auth',    authRoutes);
+app.use('/api/auth',    authLimiter, authRoutes);
 app.use('/api/history', historyRoutes);
 app.use('/api/pdf',     pdfRoutes);
 app.use('/api/convert', convertRoutes);
 app.use('/api/secure',  secureRoutes);
-app.use('/api/ai',      aiRoutes);
+app.use('/api/ai',      aiLimiter, aiRoutes);
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {

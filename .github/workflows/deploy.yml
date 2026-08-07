@@ -52,18 +52,37 @@ jobs:
           script: |
             # Login to Docker
             echo "$DOCKER_PASSWORD" | docker login -u "$CLEAN_DOCKER_USERNAME" --password-stdin
-            
+
+            # ── Ensure Redis container is running ──────────────────────────────
+            # Only starts Redis if it is not already running (idempotent)
+            if [ "$(docker inspect -f '{{.State.Running}}' pageforge-redis 2>/dev/null)" != "true" ]; then
+              echo "Starting Redis container..."
+              docker stop pageforge-redis 2>/dev/null || true
+              docker rm   pageforge-redis 2>/dev/null || true
+              docker run -d \
+                --name pageforge-redis \
+                --restart always \
+                -p 127.0.0.1:6379:6379 \
+                -v pageforge-redis-data:/data \
+                redis:7-alpine \
+                redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+              echo "Redis container started."
+            else
+              echo "Redis container is already running — skipping."
+            fi
+
+            # ── Deploy Backend ─────────────────────────────────────────────────
             # Pull the latest backend image
             docker pull $CLEAN_DOCKER_USERNAME/page-forge-backend:latest
             
             # Stop and remove the existing container if it exists
             docker stop page-forge-backend || true
-            docker rm page-forge-backend || true
+            docker rm   page-forge-backend || true
             
-            # Run the new container
+            # Run the backend — shares host network so it can reach Redis on 127.0.0.1:6379
             docker run -d \
               --name page-forge-backend \
-              -p 5000:5000 \
+              --network host \
               --restart always \
               -v /var/www/uploads:/usr/src/app/uploads \
               --env-file /home/${{ secrets.EC2_USERNAME }}/.env \

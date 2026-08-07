@@ -1,8 +1,10 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { db } from '../config/db.js';
+import { getRedisClient } from '../config/redis.js';
 import { generateEmbeddings, generateSummary, askGeminiStream } from '../services/ai.service.js';
 import { addHistoryEntry } from './history.controller.js';
 import { uploadFileToS3, deleteFileFromS3, getPresignedUrl } from '../services/s3.service.js';
@@ -60,11 +62,55 @@ export const summarizePdf = async (req, res) => {
       return res.status(400).json({ error: 'Please upload a PDF file.' });
     }
 
-    let text = '';
+    let fileBuffer;
     try {
-      const fileBuffer = fs.readFileSync(req.file.path);
+      fileBuffer = fs.readFileSync(req.file.path);
+    } catch (err) {
+      console.error('[Summarize] Read file error:', err);
+      return res.status(400).json({ error: 'Could not read the uploaded file.' });
+    }
+
+    // 1. Calculate file hash to use as Cache Key
+    const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+    const cacheKey = `pdf:summary:${fileHash}`;
+    const redis = getRedisClient();
+
+    // 2. Check Redis Cache
+    if (redis) {
+      try {
+        const cachedSummary = await redis.get(cacheKey);
+        if (cachedSummary) {
+          console.log(`[Summarize] Cache HIT for file hash: ${fileHash}`);
+          
+          // Clean up uploaded file from local storage since it's no longer needed
+          if (req.file.path && fs.existsSync(req.file.path)) {
+            try { fs.unlinkSync(req.file.path); } catch (_) {}
+          }
+
+          // Save operation to history asynchronously
+          addHistoryEntry(req.user.id, {
+            filename: req.file.originalname,
+            operation: 'summary',
+            metadata: {
+              cached: true,
+              hash: fileHash
+            },
+          });
+
+          return res.json(JSON.parse(cachedSummary));
+        }
+        console.log(`[Summarize] Cache MISS for file hash: ${fileHash}`);
+      } catch (err) {
+        console.error('[Summarize] Redis get error:', err.message);
+      }
+    }
+
+    let text = '';
+    let pageCount = 1;
+    try {
       const parsed = await pdfParse(fileBuffer);
       text = parsed.text;
+      pageCount = parsed.numpages || text.split('\f').length || 1;
     } catch (err) {
       console.error('[Summarize] pdf-parse error:', err);
       return res.status(400).json({ error: 'Could not extract text from this PDF. It may be secured or empty.' });
@@ -81,13 +127,25 @@ export const summarizePdf = async (req, res) => {
 
     const structuredSummary = await generateSummary(text);
 
+    // 3. Cache the summary in Redis (TTL: 7 Days)
+    if (redis && structuredSummary) {
+      try {
+        const cacheTtlSeconds = 7 * 24 * 60 * 60; // 7 days
+        await redis.set(cacheKey, JSON.stringify(structuredSummary), 'EX', cacheTtlSeconds);
+        console.log(`[Summarize] Successfully cached summary for hash: ${fileHash}`);
+      } catch (err) {
+        console.error('[Summarize] Redis set error:', err.message);
+      }
+    }
+
     // Save operation to history
     await addHistoryEntry(req.user.id, {
       filename: req.file.originalname,
       operation: 'summary',
       metadata: {
-        pages: text.split('\f').length || 1,
+        pages: pageCount,
         keyPointsCount: structuredSummary.keyPoints?.length || 0,
+        hash: fileHash
       },
     });
 

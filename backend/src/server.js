@@ -2,6 +2,10 @@ import app from './app.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initRedis } from './config/redis.js';
+
+// Initialize Redis connection
+initRedis();
 
 const PORT = process.env.PORT || 5001;
 
