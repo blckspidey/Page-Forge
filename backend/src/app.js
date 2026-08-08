@@ -19,6 +19,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+// Trust the first proxy hop (Nginx) so express-rate-limit can read the real
+// client IP from the X-Forwarded-For header. Value of 1 = trust one proxy.
+app.set('trust proxy', 1);
+
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ─── Security Headers ─────────────────────────────────────────────────────────
