@@ -1,6 +1,7 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import fs from 'fs';
+import { getRedisClient } from '../config/redis.js';
 
 export const isS3Configured = () => {
   return !!(
@@ -110,6 +111,22 @@ export const deleteFileFromS3 = async (s3Key) => {
  */
 export const getPresignedUrl = async (s3Key, expiresInSeconds = 86400) => {
   if (!s3Client) return null;
+  const redis = getRedisClient();
+  const cacheKey = `s3:presigned:${s3Key}`;
+
+  if (redis) {
+    try {
+      const cachedUrl = await redis.get(cacheKey);
+      if (cachedUrl) {
+        console.log(`[S3 Service] Cache HIT for S3 Key: ${s3Key}`);
+        return cachedUrl;
+      }
+      console.log(`[S3 Service] Cache MISS for S3 Key: ${s3Key}`);
+    } catch (err) {
+      console.error('[S3 Service] Redis get error:', err.message);
+    }
+  }
+
   try {
     const filename = s3Key.split('/').pop() || 'document.pdf';
     const command = new GetObjectCommand({
@@ -118,6 +135,17 @@ export const getPresignedUrl = async (s3Key, expiresInSeconds = 86400) => {
       ResponseContentDisposition: `attachment; filename="${filename}"`
     });
     const url = await getSignedUrl(s3Client, command, { expiresIn: expiresInSeconds });
+
+    if (redis && url) {
+      try {
+        const cacheTtlSeconds = Math.max(expiresInSeconds - 3600, 300); // 1-hour buffer
+        await redis.set(cacheKey, url, 'EX', cacheTtlSeconds);
+        console.log(`[S3 Service] Cached S3 Key: ${s3Key} for ${cacheTtlSeconds}s`);
+      } catch (err) {
+        console.error('[S3 Service] Redis set error:', err.message);
+      }
+    }
+
     return url;
   } catch (err) {
     console.error(`[S3 Service] Failed to generate presigned URL for ${s3Key}:`, err);
