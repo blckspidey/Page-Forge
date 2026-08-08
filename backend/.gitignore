@@ -4,6 +4,7 @@ uploads/*
 !uploads/.gitkeep
 .env
 *.log
+test-redis.js
 
 # OS
 .DS_Store
