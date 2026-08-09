@@ -54,6 +54,14 @@
 - Output files are uploaded to S3 with 24-hour presigned download URLs
 - History page displays all past operations with re-download links
 
+### Performance & Security (Redis Caching & Rate Limiting)
+| Feature | Description |
+|---|---|
+| **S3 Presigned URL Caching** | Presigned S3 URLs are cached in Redis for 23 hours to eliminate AWS SDK latency on history loads |
+| **PDF Summary Caching** | SHA-256 document fingerprinting caches PDF summaries for 7 days, saving Gemini API costs |
+| **Distributed Rate Limiting** | Redis-backed request throttling across Global (300/15m), Auth (15/15m), and AI (30/15m) tiers |
+| **Graceful Degradation** | Auto-retry and ready checks fallback seamlessly to non-cached DB operations if Redis is offline |
+
 ---
 
 ## Tech Stack
@@ -86,6 +94,8 @@
 | **docx** | Generates Word documents for PDF-to-Word conversion |
 | **Passport.js** | Google OAuth 2.0 strategy |
 | **JWT (jsonwebtoken)** | Access and refresh token issuance |
+| **ioredis** | High-performance Redis client with exponential backoff & auto-retry management |
+| **rate-limit-redis** | Distributed Redis store for express-rate-limit |
 | **Helmet** | HTTP security headers |
 | **Multer** | Multipart file upload handling (50MB limit) |
 | **bcryptjs** | Password hashing |
@@ -95,6 +105,7 @@
 |---|---|
 | **Docker** | Backend containerization |
 | **Docker Hub** | Container registry |
+| **Redis 7** | In-memory key-value cache (self-hosted container on EC2 or Upstash serverless) |
 | **AWS EC2** | Backend hosting |
 | **Nginx** | Reverse proxy with SSL termination and 300s timeouts |
 | **Certbot / Let's Encrypt** | HTTPS SSL certificates |
@@ -122,9 +133,10 @@ Page-Forge/
 │       │   ├── db.js           # Prisma client (Neon serverless adapter)
 │       │   ├── env.js          # Environment variable validation
 │       │   ├── jwt.js          # Token sign/verify helpers
-│       │   └── passport.js     # Google OAuth strategy
+│       │   ├── passport.js     # Google OAuth strategy
+│       │   └── redis.js        # Redis client & connection pool with graceful fallback
 │       ├── controllers/
-│       │   ├── ai.controller.js       # Summarize, RAG upload, chat, sessions
+│       │   ├── ai.controller.js       # Summarize (SHA-256 cached), RAG upload, chat, sessions
 │       │   ├── auth.controller.js     # Register, login, logout, refresh, me
 │       │   ├── convert.controller.js  # Word→PDF, PDF→Word
 │       │   ├── history.controller.js  # Get history, add entry, presigned URLs
@@ -132,6 +144,7 @@ Page-Forge/
 │       │   └── secure.controller.js   # Protect, unlock
 │       ├── middleware/
 │       │   ├── auth.middleware.js     # authMiddleware, optionalAuth
+│       │   ├── rateLimiter.js         # Redis-backed / in-memory rate limit factory
 │       │   └── upload.middleware.js   # Multer config (50MB, PDF/DOCX/images)
 │       ├── routes/
 │       │   ├── ai.routes.js
@@ -200,6 +213,11 @@ Nginx (EC2 — api.pageforge.ganeshdev.me)
 Docker Container (page-forge-backend)
   Express API (Node.js 20)
         │
+        ├── Redis 7 (pageforge-redis container / Upstash)
+        │     - s3:presigned:{key}   (23-hour S3 URL cache)
+        │     - pdf:summary:{sha256} (7-day summary cache)
+        │     - Distributed rate limit counters
+        │
         ├── Neon PostgreSQL (via Prisma + @neondatabase/serverless)
         │     - users, chat_sessions, history_entries tables
         │     - pgvector extension for document embeddings
@@ -217,15 +235,19 @@ Docker Container (page-forge-backend)
 
 1. **Optional Auth on PDF Tools** — All core PDF operations work without login. If a JWT cookie is present, the result is logged to user history.
 
-2. **S3 Presigned URLs** — S3 bucket is private. History entries store S3 keys, not public URLs. On history load, 24-hour presigned URLs are generated per entry. Single S3 failures don't crash the history list (wrapped in `try-catch`).
+2. **S3 Presigned URLs & Caching** — S3 bucket is private. History entries store S3 keys, not public URLs. On history load, presigned URLs are cached in Redis (`s3:presigned:{s3Key}`) with a 23-hour TTL. Single S3 failures don't crash the history list.
 
-3. **Awaited History Writes** — `addHistoryEntry()` is `await`ed before sending the file response. This ensures the database record is committed before the frontend receives the download and attempts to refresh history.
+3. **Deterministic PDF Summary Caching** — PDF files are fingerprinted using SHA-256 hashes (`pdf:summary:{sha256}`). Duplicate uploads hit Redis for instant responses (<50ms), bypassing `pdf-parse` and Gemini API calls to reduce token costs.
 
-4. **Streaming RAG Chat** — Gemini streams text via `generateContentStream`. The backend forwards chunks to the frontend using Server-Sent Events (SSE) with `text/event-stream`. The full response is saved to the chat session on completion.
+4. **Distributed Tiered Rate Limiting** — `express-rate-limit` is backed by `rate-limit-redis` for multi-instance throttling. Express `trust proxy` is configured for Nginx (`X-Forwarded-For`). Applied in 3 tiers: Global (300 req/15m), Auth (15 req/15m), AI (30 req/15m).
 
-5. **Large File Support** — Nginx allows 100MB uploads and 300s proxy timeouts. The Axios `editPDF` call has a 5-minute timeout with `maxContentLength: Infinity`.
+5. **Awaited History Writes** — `addHistoryEntry()` is `await`ed before sending the file response. This ensures the database record is committed before the frontend receives the download and attempts to refresh history.
 
-6. **Word-to-PDF Platform Detection** — On Windows (dev), PowerShell + Microsoft Word COM automation is used. On Linux/Docker (production), LibreOffice `soffice --headless` is used.
+6. **Streaming RAG Chat** — Gemini streams text via `generateContentStream`. The backend forwards chunks to the frontend using Server-Sent Events (SSE) with `text/event-stream`. The full response is saved to the chat session on completion.
+
+7. **Large File Support** — Nginx allows 100MB uploads and 300s proxy timeouts. The Axios `editPDF` call has a 5-minute timeout with `maxContentLength: Infinity`.
+
+8. **Word-to-PDF Platform Detection** — On Windows (dev), PowerShell + Microsoft Word COM automation is used. On Linux/Docker (production), LibreOffice `soffice --headless` is used.
 
 ---
 
@@ -324,6 +346,9 @@ AWS_SECRET_ACCESS_KEY=your_secret_key
 AWS_REGION=ap-south-1
 S3_BUCKET_NAME=page-forge-toolkit-storage
 
+# ── Redis Cache (Optional - gracefully falls back if offline) ──
+REDIS_URL=redis://localhost:6379
+
 # ── Google Gemini AI ─────────────────────────────────────
 GEMINI_API_KEY=AIza...
 
@@ -418,13 +443,24 @@ docker push yourdockerhub/page-forge-backend:latest
 
 ### EC2 Deployment
 
+### EC2 Deployment
+
 ```bash
-# On EC2 — pull and run the container
+# On EC2 — launch Redis container (if self-hosting)
+docker run -d \
+  --name pageforge-redis \
+  --restart always \
+  -p 127.0.0.1:6379:6379 \
+  -v pageforge-redis-data:/data \
+  redis:7-alpine \
+  redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+# Pull and run the backend container
 docker pull yourdockerhub/page-forge-backend:latest
 
 docker run -d \
   --name page-forge-backend \
-  -p 5000:5000 \
+  --network host \
   --restart always \
   -v /var/www/uploads:/usr/src/app/uploads \
   --env-file /home/ubuntu/.env \
